@@ -25,7 +25,14 @@ function drawRadius() {
   } else if (State.orsKey) {
     drawOrsIsochrone(State.radiusMode);
   } else {
-    showOrsKeyPanel();
+    // No ORS key — use OSRM approximation directly, offer key panel via toast
+    showToast('Kein ORS-Key — OSRM-Näherung wird berechnet… (⚙ für Key)');
+    State.orsLoading = true;
+    const progress = document.getElementById('ors-progress');
+    progress.style.display = 'block';
+    _drawOsrmApproximation(State.radiusMode).finally(() => {
+      State.orsLoading = false;
+    });
   }
 }
 
@@ -117,32 +124,61 @@ async function drawOrsIsochrone(mode) {
     showToast(`Lade ${mode === 'road' ? 'Straßen-Radius' : 'Fahrzeit-Isochrone'}… (${pts.length} Punkte)`);
 
     const allPolygons = [];
-    let done = 0;
+    let done         = 0;
+    let fatalError   = null; // set on unrecoverable error to break loop early
 
     for (const [idx, batch] of batches.entries()) {
+      if (fatalError) break;
       try {
-        const resp = await fetch('https://api.openrouteservice.org/v2/isochrones/driving-car', {
-          method: 'POST',
-          headers: {
-            'Authorization': State.orsKey,
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          body: JSON.stringify({ locations: batch, range: [rangeVal], range_type: rangeType, smoothing: 5 }),
-        });
+        const ctrl = new AbortController();
+        const tid  = setTimeout(() => ctrl.abort(), 15000); // 15s per batch
+        let resp;
+        try {
+          resp = await fetch('https://api.openrouteservice.org/v2/isochrones/driving-car', {
+            method: 'POST',
+            signal: ctrl.signal,
+            headers: {
+              'Authorization': State.orsKey,
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: JSON.stringify({ locations: batch, range: [rangeVal], range_type: rangeType, smoothing: 5 }),
+          });
+        } finally {
+          clearTimeout(tid);
+        }
 
         if (resp.status === 401 || resp.status === 403) {
-          showToast('ORS API-Key ungültig');
+          showToast('⚠ ORS API-Key ungültig oder abgelaufen');
           progress.style.display = 'none';
           showOrsKeyPanel();
-          return; // finally still runs
+          fatalError = 'auth';
+          return; // finally resets orsLoading
         }
-
-        if (resp.ok) {
+        if (resp.status === 429) {
+          showToast('⚠ ORS Rate-Limit erreicht — bitte kurz warten');
+          fatalError = 'ratelimit';
+          break;
+        }
+        if (resp.status >= 500) {
+          showToast(`⚠ ORS Server-Fehler (${resp.status}) — Versuch wird fortgesetzt`);
+          // don't break, try remaining batches
+        } else if (resp.ok) {
           const data = await resp.json();
-          if (data.features) allPolygons.push(...data.features);
+          if (data.error) {
+            // ORS returns 200 with error object on some failures
+            console.warn('[ORS] API error:', data.error.message || data.error);
+            showToast(`⚠ ORS: ${data.error.message || 'Unbekannter Fehler'}`);
+          } else if (data.features) {
+            allPolygons.push(...data.features);
+          }
         }
-      } catch { /* skip failed batch */ }
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          showToast('⚠ ORS Timeout — Batch übersprungen');
+        }
+        // network error: skip batch, continue
+      }
 
       done += batch.length;
       progress.style.transform = `scaleX(${done / pts.length})`;
@@ -156,7 +192,17 @@ async function drawOrsIsochrone(mode) {
     setTimeout(() => { progress.style.display = 'none'; progress.style.transform = 'scaleX(0)'; }, 400);
 
     if (allPolygons.length === 0) {
-      showToast('Keine Daten von ORS erhalten');
+      if (fatalError === 'ratelimit') {
+        showToast('ORS Rate-Limit — versuche OSRM-Approximation…');
+      } else if (fatalError === 'auth') {
+        return; // already handled
+      } else {
+        showToast('⚠ ORS Limit überschritten (Free-Tier: max 100km/1h) — OSRM-Approximation wird geladen…');
+      }
+      // Fallback: OSRM-based approximation
+      progress.style.display = 'block';
+      progress.style.transform = 'scaleX(0.1)';
+      await _drawOsrmApproximation(mode);
       return;
     }
 
@@ -182,6 +228,117 @@ async function drawOrsIsochrone(mode) {
   } finally {
     State.orsLoading = false; // Fix 5: always reset, even on unexpected throw
   }
+}
+
+// ── OSRM-based radius approximation ──────────────────────
+// Used as fallback when ORS Free-Tier limits are exceeded.
+// Strategy: sample N border points, compute a reachable point ~radiusKm
+// outward from each using OSRM table (snap), build convex hull as polygon.
+
+async function _drawOsrmApproximation(mode) {
+  const progress = document.getElementById('ors-progress');
+  const color    = mode === 'road' ? '#533483' : '#1d9e75';
+
+  // Sample fewer points for OSRM (table API can handle ~25 at once)
+  const N   = 24;
+  const pts = sampleBorderPoints(N); // [lng, lat] each
+
+  // For each border point, compute a destination point ~radiusKm outward
+  // by extending the vector from Germany center through the border point
+  const cx  = 10.4515;
+  const cy  = 51.1657;
+  const destinations = pts.map(([bLng, bLat]) => {
+    const dx  = bLng - cx;
+    const dy  = bLat - cy;
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+    // 1° ≈ 111km; push outward by radiusKm
+    const scale = State.radiusKm / 111 / len;
+    return [bLng + dx * scale, bLat + dy * scale];
+  });
+
+  // Use OSRM table to snap destinations to real roads
+  // We query: source = border point, destination = projected point
+  // and take the snapped destination coordinate from the annotation
+  const snappedPts = [];
+  const CHUNK = 6; // OSRM table: keep small to avoid 414 URI Too Long
+
+  progress.style.transform = 'scaleX(0.2)';
+
+  for (let i = 0; i < pts.length; i += CHUNK) {
+    const chunk    = pts.slice(i, i + CHUNK);
+    const dstChunk = destinations.slice(i, i + CHUNK);
+
+    // Build coordinate string: sources first, then destinations
+    const coords = [...chunk, ...dstChunk]
+      .map(([lng, lat]) => `${lng},${lat}`).join(';');
+    const srcIdx = chunk.map((_, j) => j).join(';');
+    const dstIdx = dstChunk.map((_, j) => chunk.length + j).join(';');
+
+    try {
+      const ctrl = new AbortController();
+      const tid  = setTimeout(() => ctrl.abort(), 10000);
+      let data;
+      try {
+        const url  = `https://router.project-osrm.org/table/v1/driving/${coords}` +
+                     `?sources=${srcIdx}&destinations=${dstIdx}&annotations=distance`;
+        const resp = await fetch(url, { signal: ctrl.signal });
+        if (!resp.ok) continue;
+        data = await resp.json();
+      } finally { clearTimeout(tid); }
+
+      if (data.code !== 'Ok') continue;
+
+      // OSRM table gives us snapped waypoints in data.destinations
+      // Each destination[j].location is [lng, lat] of snapped road point
+      for (const dest of (data.destinations || [])) {
+        if (dest?.location) snappedPts.push(dest.location); // [lng, lat]
+      }
+    } catch { /* skip chunk */ }
+
+    progress.style.transform = `scaleX(${0.2 + 0.7 * (i / pts.length)})`;
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  progress.style.transform = 'scaleX(1)';
+  setTimeout(() => { progress.style.display = 'none'; progress.style.transform = 'scaleX(0)'; }, 400);
+
+  if (snappedPts.length < 3) {
+    showToast('⚠ OSRM-Approximation fehlgeschlagen — Luftlinie wird angezeigt');
+    setRadiusMode('aerial');
+    return;
+  }
+
+  // Build convex hull from snapped points + Germany border
+  const allPts = [
+    ...snappedPts.map(p => turf.point(p)),
+    ...GERMANY_BORDER.geometry.coordinates[0].map(c => turf.point(c)),
+  ];
+  let hull;
+  try {
+    hull = turf.convex(turf.featureCollection(allPts));
+  } catch {
+    hull = null;
+  }
+
+  if (!hull) {
+    showToast('⚠ Konvexe Hülle fehlgeschlagen — Luftlinie wird angezeigt');
+    setRadiusMode('aerial');
+    return;
+  }
+
+  if (State.orsLayer) { State.map.removeLayer(State.orsLayer); State.orsLayer = null; }
+  State.orsLayer = L.geoJSON(hull, {
+    style: { color, weight: 2.5, opacity: 0.85, fillColor: color, fillOpacity: 0.07, dashArray: '8,5' },
+  }).addTo(State.map);
+
+  isochroneSetCache(mode, State.radiusKm, hull);
+
+  const label = mode === 'road'
+    ? `${State.radiusKm}km Straße (Näherung)`
+    : `${formatTime(Math.round(State.radiusKm / 100 * 3600))} Fahrzeit (Näherung)`;
+  showToast(`✓ ${label} — OSRM-Approximation`);
+  document.getElementById('chip-radius-val').textContent = label;
+  State.orsLoading = false;
 }
 
 // ── Radius mode toggle ────────────────────────────────────
