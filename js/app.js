@@ -2,11 +2,28 @@
 // App bootstrap: wires up all event listeners and calls init.
 
 document.addEventListener('DOMContentLoaded', () => {
+  try {
 
   // ── Map & radius ──────────────────────────────────────
   initMap();
   initRadiusSliderEvents();
   initOrsEvents();
+  initSettingsPanel();
+  _updateOrsKeyBtn(); // show key status on load
+
+  // ── Dynamic bottom bar height ─────────────────────────
+  // ResizeObserver keeps --bar-h exactly equal to bottom panel height
+  // so FABs and panels are never covered regardless of chip visibility.
+  const bottomPanel = document.getElementById('bottom-panel');
+  if (bottomPanel && window.ResizeObserver) {
+    const ro = new ResizeObserver(entries => {
+      for (const e of entries) {
+        const h = Math.ceil(e.contentRect.height) + 8; // 8px breathing room
+        document.documentElement.style.setProperty('--bar-h', `${h}px`);
+      }
+    });
+    ro.observe(bottomPanel);
+  }
 
   // Radius button: tap = toggle mode bar, long-press = open slider (handled in radius.js)
   document.getElementById('btn-radius').addEventListener('click', () => {
@@ -17,7 +34,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!open) State.map.flyTo(GERMANY_CENTER, 5);
   });
   // Set icon
-  document.getElementById('btn-radius').querySelector('.icon').textContent = '⚙';
+  const _radiusIcon = document.getElementById('btn-radius')?.querySelector('.icon');
+  if (_radiusIcon) _radiusIcon.textContent = '⚙';
 
   // ── GPS ───────────────────────────────────────────────
   document.getElementById('fab-locate').addEventListener('click', locateUser);
@@ -53,6 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
     localStorage.setItem('ocm-key', key);
     hideOcmKeyPanel();
     showToast(key ? '✓ OCM API-Key gespeichert' : 'OCM-Key geleert — Fallback auf OSM');
+    if (typeof _updateSettingsStatus === 'function') _updateSettingsStatus();
   });
   document.getElementById('ocm-cancel-btn').addEventListener('click', hideOcmKeyPanel);
   document.getElementById('ocm-overlay').addEventListener('click', hideOcmKeyPanel);
@@ -99,4 +118,43 @@ document.addEventListener('DOMContentLoaded', () => {
   // Loads ~5000-point OSM border into sessionStorage cache.
   // All border distance calculations auto-upgrade once loaded.
   loadHighResBorder();
+
+  // ── Live border crossings (async, non-blocking) ────────
+  // Loads all ~140 German Grenzübergänge from Overpass, 24h cached.
+  // Falls back to 24 hardcoded crossings if Overpass unavailable.
+  loadLiveCrossings();
+
+  // Fix 5: clean up expired ORS cache entries on startup
+  _cleanExpiredOrsCache();
+
+  } catch(err) {
+    console.error('[app] init error:', err.message, err.stack?.split('\n')?.[1]);
+    try { if(typeof initSettingsPanel==='function') initSettingsPanel(); } catch(e){}
+  }
 });
+
+function _cleanExpiredOrsCache() {
+  try {
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith('ors-iso-v1:')) continue;
+      try {
+        const entry = JSON.parse(localStorage.getItem(key));
+        if (!entry || !entry.ts || Date.now() - entry.ts > ORS_CACHE_TTL_MS) {
+          keysToRemove.push(key);
+        }
+      } catch { keysToRemove.push(key); }
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
+  } catch { /* ignore */ }
+}
+
+// ── ORS key button status ──────────────────────────────────
+function _updateOrsKeyBtn() {
+  const btn = document.getElementById('rmode-ors-key-btn');
+  if (!btn) return;
+  const hasKey = !!State.orsKey;
+  btn.textContent = hasKey ? '🔑 ORS ✓' : '🔑 ORS-Key';
+  btn.style.color = hasKey ? '#1d9e75' : '';
+}

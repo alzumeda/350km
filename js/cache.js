@@ -36,7 +36,7 @@ function isochroneGetCache(mode, radiusKm) {
       localStorage.removeItem(_isoKey(mode, radiusKm));
       return null;
     }
-    return entry.data;
+    return { data: entry.data, src: entry.src || 'unknown' };
   } catch {
     return null;
   }
@@ -46,9 +46,9 @@ function isochroneGetCache(mode, radiusKm) {
  * Store an isochrone GeoJSON in the cache.
  * Silently ignores quota errors.
  */
-function isochroneSetCache(mode, radiusKm, geojson) {
+function isochroneSetCache(mode, radiusKm, geojson, source) {
   try {
-    const entry = { ts: Date.now(), data: geojson };
+    const entry = { ts: Date.now(), data: geojson, src: source || 'unknown' };
     localStorage.setItem(_isoKey(mode, radiusKm), JSON.stringify(entry));
   } catch {
     // localStorage quota exceeded – skip caching

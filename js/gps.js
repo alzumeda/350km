@@ -47,9 +47,9 @@ function _onPosition(pos, btn) {
   // Async: update chip with driving distance
   drivingDistToBorder(State.userPos[0], State.userPos[1]).then(d => {
     if (!d) return;
-    document.getElementById('chip-dist-text').textContent =
-      `${d.driveKm.toFixed(1)} km · ${d.driveMin}min zur Grenze`;
-  });
+    const el = document.getElementById('chip-dist-text');
+    if (el) el.textContent = `${d.driveKm.toFixed(1)} km · ${d.driveMin}min zur Grenze`;
+  }).catch(e => console.warn('[gps] border dist:', e.message));
 
   // Fix 5: always clear old watch before starting new one
   if (State.watchId !== null) {

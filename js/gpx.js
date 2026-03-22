@@ -92,8 +92,8 @@ function exportGpx() {
   }
 
   const latLngs     = State.lastRouteCoords;
-  const elevSamples = window._lastElevSamples || null;
-  const elevations  = window._lastElevations  || null;
+  const elevSamples = State.lastElevSamples || null;
+  const elevations  = State.lastElevations  || null;
 
   // Route name: "Route <destination lat,lng>"
   const last   = latLngs[latLngs.length - 1];
