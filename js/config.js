@@ -58,11 +58,12 @@ const TILE_LAYERS = {
   humanitarian: { url: 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',   attr: '© OpenStreetMap contributors, HOT',   label: 'Humanitarian' },
 };
 
-// Number of border points sampled for ORS isochrone requests
-const ORS_BORDER_SAMPLE_POINTS = 40;
-// Points per ORS batch request (free tier limit)
+// Number of border points sampled for ORS isochrone requests.
+// Free tier: 500 req/day → keep low. 20pts / 5 per batch = 4 requests per calculation.
+const ORS_BORDER_SAMPLE_POINTS = 20;
+// Points per ORS batch request (free tier limit: 5)
 const ORS_BATCH_SIZE = 5;
-// Delay between ORS batches in ms (free tier: 40 req/min)
+// Delay between ORS batches in ms (free tier: 40 req/min = 1500ms min)
 const ORS_BATCH_DELAY_MS = 1600;
 // ORS isochrone cache duration (ms) — avoids re-fetching same radius
 const ORS_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour

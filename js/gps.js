@@ -47,19 +47,28 @@ function _onPosition(pos, btn) {
   // Async: update chip with driving distance
   drivingDistToBorder(State.userPos[0], State.userPos[1]).then(d => {
     if (!d) return;
-    document.getElementById('chip-dist-text').textContent =
-      `${d.driveKm.toFixed(1)} km · ${d.driveMin}min zur Grenze`;
-  });
+    const el = document.getElementById('chip-dist-text');
+    if (el) el.textContent = `${d.driveKm.toFixed(1)} km · ${d.driveMin}min zur Grenze`;
+  }).catch(e => console.warn('[gps] border dist:', e.message));
 
   // Fix 5: always clear old watch before starting new one
   if (State.watchId !== null) {
     navigator.geolocation.clearWatch(State.watchId);
     State.watchId = null;
   }
+  let _lastRadiusCheck = 0;
   State.watchId = navigator.geolocation.watchPosition(
     p => {
       State.userPos = [p.coords.latitude, p.coords.longitude];
       _updateUserMarker(State.userPos);
+      // Debounce expensive radius check to max once per 3s
+      const now = Date.now();
+      if (now - _lastRadiusCheck > 3000) {
+        _lastRadiusCheck = now;
+        const inside = _isInsideRadius(State.userPos);
+        const chip = document.getElementById('chip-radius');
+        if (chip) chip.style.borderColor = inside ? '#1d9e75' : '#e94560';
+      }
     },
     null,
     { enableHighAccuracy: true, maximumAge: 5000 }

@@ -20,13 +20,20 @@ function getSharedRadiusBuffer() {
 
 function initMap() {
   State.map = L.map('map', {
-    zoomControl: true,
+    zoomControl:      true,
     attributionControl: true,
+    preferCanvas:     true,  // Canvas renderer — faster for large polygons on zoom
+    zoomSnap:         0.5,   // Smoother zoom steps
+    wheelPxPerZoomLevel: 120, // Less aggressive scroll zoom
   }).setView(GERMANY_CENTER, 5);
 
   State.tileLayer = L.tileLayer(TILE_LAYERS.standard.url, {
-    attribution: TILE_LAYERS.standard.attr,
-    maxZoom: 18,
+    attribution:       TILE_LAYERS.standard.attr,
+    maxZoom:           18,
+    keepBuffer:        4,     // Pre-load 4 tile widths outside viewport
+    updateWhenZooming: false, // Don't load tiles mid-zoom — wait for zoom end
+    updateWhenIdle:    false, // Load tiles during pan (not just on idle)
+    crossOrigin:       true,  // Enables browser tile caching
   }).addTo(State.map);
 
   // Draw initial radius
