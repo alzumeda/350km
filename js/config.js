@@ -19,6 +19,39 @@ const GERMANY_BORDER = { type: 'Feature', geometry: { type: 'Polygon', coordinat
   [6.831,47.982],[6.865,47.271]
 ]] }};
 
+// ── Allowed countries (ISO 3166-1 alpha-2) ────────────────
+// Only fully-coloured countries from the reference map.
+// Clicks on any other country show a "not in allowed area" toast.
+const ALLOWED_COUNTRIES_LIST = [
+  'IS', // Island
+  'IE', // Irland
+  'GB', // Vereinigtes Königreich
+  'NO', // Norwegen
+  'SE', // Schweden
+  'DK', // Dänemark
+  'NL', // Niederlande
+  'BE', // Belgien
+  'LU', // Luxemburg
+  'DE', // Deutschland
+  'PL', // Polen
+  'FR', // Frankreich
+  'CH', // Schweiz
+  'LI', // Liechtenstein
+  'AT', // Österreich
+  'CZ', // Tschechien
+  'SI', // Slowenien
+  'HR', // Kroatien
+  'IT', // Italien
+  'SM', // San Marino
+  'MC', // Monaco
+  'AD', // Andorra
+  'VA', // Vatikanstadt
+  'ES', // Spanien
+  'PT', // Portugal
+];
+// Fix 4: Set built here so all modules can use it without depending on routing.js load order
+const ALLOWED_COUNTRIES = new Set(ALLOWED_COUNTRIES_LIST);
+
 const TILE_LAYERS = {
   standard:     { url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',      attr: '© OpenStreetMap contributors',       label: 'Standard' },
   topo:         { url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',         attr: '© OpenTopoMap contributors',          label: 'Topo' },
@@ -41,4 +74,8 @@ const POI_TYPES = [
   { query: 'amenity=hospital',    icon: '🏥', label: 'Krankenhäuser' },
   { query: 'tourism=attraction',  icon: '⭐', label: 'Sehenswürdigkeiten' },
   { query: 'amenity=supermarket', icon: '🛒', label: 'Supermärkte' },
+  // EV charging — each tier has minKw for client-side filtering
+  { query: 'amenity=charging_station', icon: '⚡', label: 'Lader ≥50 kW',  minKw: 50,  maxKw: 149, color: '#1d9e75' },
+  { query: 'amenity=charging_station', icon: '⚡', label: 'Lader ≥150 kW', minKw: 150, maxKw: 349, color: '#e9a020' },
+  { query: 'amenity=charging_station', icon: '⚡', label: 'Lader ≥350 kW', minKw: 350, maxKw: null, color: '#e94560' },
 ];

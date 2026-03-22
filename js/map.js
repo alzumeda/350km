@@ -1,6 +1,23 @@
 // ── map.js ────────────────────────────────────────────────
 // Leaflet map init and tile layer management.
 
+// Fix 3: single shared turf.buffer cache used by gps.js, search.js, poi.js
+let _sharedRadiusBuffer   = null;
+let _sharedRadiusBufferKm = null;
+
+function getSharedRadiusBuffer() {
+  if (_sharedRadiusBuffer && _sharedRadiusBufferKm === State.radiusKm)
+    return _sharedRadiusBuffer;
+  try {
+    _sharedRadiusBuffer   = turf.buffer(GERMANY_BORDER, State.radiusKm, { units: 'kilometers', steps: 32 });
+    _sharedRadiusBufferKm = State.radiusKm;
+  } catch {
+    _sharedRadiusBuffer   = null;
+    _sharedRadiusBufferKm = null;
+  }
+  return _sharedRadiusBuffer;
+}
+
 function initMap() {
   State.map = L.map('map', {
     zoomControl: true,

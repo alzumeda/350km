@@ -27,6 +27,7 @@ const State = {
   routeControl: null,
   destinationMarker: null,
   routeMode: false,
+  lastRouteCoords: null,   // L.LatLng[] of current route for GPX export
 
   // POI
   poiMarkers: [],
@@ -34,6 +35,12 @@ const State = {
   // ORS
   orsKey: localStorage.getItem('ors-key') || '',
   orsLoading: false,
+
+  // OCM
+  ocmKey: localStorage.getItem('ocm-key') || '',
+
+  // OpenChargeMap
+  ocmKey: localStorage.getItem('ocm-key') || '',
 
   // UI chips (set after DOM ready)
   chips: {},

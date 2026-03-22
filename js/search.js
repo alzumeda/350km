@@ -1,6 +1,8 @@
 // ── search.js ─────────────────────────────────────────────
 // Nominatim geocoding / place search.
 
+// Fix 3: uses getSharedRadiusBuffer() from map.js — no local duplicate
+
 let _searchTimer;
 
 function initSearch() {
@@ -24,14 +26,21 @@ function initSearch() {
   });
 }
 
+// Fix 6: abort in-flight forward search to avoid parallel Nominatim hits
+let _searchAbortCtrl = null;
+
 async function _doSearch(query) {
   const results = document.getElementById('search-results');
   results.style.display = 'block';
   results.innerHTML = '<div style="padding:12px 14px;color:var(--text-muted);font-size:13px;font-family:system-ui,sans-serif">Suche…</div>';
 
+  if (_searchAbortCtrl) _searchAbortCtrl.abort(); // Fix 6: cancel previous request
+  _searchAbortCtrl = new AbortController();
+  const signal = _searchAbortCtrl.signal;
+
   try {
     const url  = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=6&addressdetails=1&accept-language=de`;
-    const data = await (await fetch(url, { headers: { 'Accept-Language': 'de' } })).json();
+    const data = await (await fetch(url, { headers: { 'Accept-Language': 'de' }, signal })).json();
 
     if (!data.length) { results.innerHTML = '<div style="padding:12px 14px;color:var(--text-muted);font-size:13px;font-family:system-ui,sans-serif">Keine Ergebnisse</div>'; return; }
 
@@ -54,16 +63,17 @@ async function _doSearch(query) {
       });
       results.appendChild(div);
     });
-  } catch {
+  } catch (err) {
+    if (err.name === 'AbortError') return; // Fix 6: silently drop cancelled requests
     results.innerHTML = '<div style="padding:12px 14px;color:var(--text-muted);font-size:13px;font-family:system-ui,sans-serif">Fehler bei der Suche</div>';
   }
 }
 
 function _isInRadius(lat, lon) {
   try {
-    const pt  = turf.point([lon, lat]);
-    const buf = turf.buffer(GERMANY_BORDER, State.radiusKm, { units: 'kilometers', steps: 32 });
-    return turf.booleanPointInPolygon(pt, buf);
+    const buf = getSharedRadiusBuffer(); // Fix 3: shared buffer
+    if (!buf) throw new Error('no buffer');
+    return turf.booleanPointInPolygon(turf.point([lon, lat]), buf);
   } catch {
     return distanceKm(lat, lon, GERMANY_CENTER[0], GERMANY_CENTER[1]) <= State.radiusKm + 200;
   }

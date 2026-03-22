@@ -31,21 +31,42 @@ function drawRadius() {
 
 // ── Aerial (Turf buffer) ──────────────────────────────────
 
+// Fix 1: cache aerial buffer per radiusKm; sequence counter prevents stale callbacks
+let _aerialBufferKm     = null;
+let _aerialBufferCoords = null;
+let _aerialDrawSeq      = 0; // incremented on each drawAerial call
+
 function _drawAerial() {
-  try {
-    const buffered = turf.buffer(GERMANY_BORDER, State.radiusKm, { units: 'kilometers', steps: 64 });
-    const coords   = buffered.geometry.coordinates[0].map(c => [c[1], c[0]]);
-    State.radiusLayer = L.polygon(coords, {
+  const seq = ++_aerialDrawSeq; // capture current sequence
+
+  // Use cached coords if radius unchanged — synchronous, no race possible
+  if (_aerialBufferKm === State.radiusKm && _aerialBufferCoords) {
+    State.radiusLayer = L.polygon(_aerialBufferCoords, {
       color: '#e94560', weight: 2.5, opacity: 0.9,
       fillColor: '#e94560', fillOpacity: 0.06, dashArray: '8,6',
     }).addTo(State.map);
-  } catch (e) {
-    // Fallback: simple circle from center
-    State.radiusLayer = L.circle(GERMANY_CENTER, {
-      radius: State.radiusM, color: '#e94560', weight: 2, opacity: 0.8,
-      fillColor: '#e94560', fillOpacity: 0.05, dashArray: '6,6',
-    }).addTo(State.map);
+    return;
   }
+  // Show a quick circle placeholder while buffer computes
+  State.radiusLayer = L.circle(GERMANY_CENTER, {
+    radius: State.radiusM, color: '#e94560', weight: 2, opacity: 0.5,
+    fillColor: '#e94560', fillOpacity: 0.04, dashArray: '6,6',
+  }).addTo(State.map);
+  // Defer heavy turf.buffer to next event loop tick so UI stays responsive
+  setTimeout(() => {
+    if (seq !== _aerialDrawSeq) return; // Fix 1: stale — a newer call has superseded this one
+    try {
+      const buffered = turf.buffer(GERMANY_BORDER, State.radiusKm, { units: 'kilometers', steps: 64 });
+      _aerialBufferCoords = buffered.geometry.coordinates[0].map(c => [c[1], c[0]]);
+      _aerialBufferKm     = State.radiusKm;
+      // Remove placeholder circle
+      if (State.radiusLayer) { State.map.removeLayer(State.radiusLayer); State.radiusLayer = null; }
+      State.radiusLayer = L.polygon(_aerialBufferCoords, {
+        color: '#e94560', weight: 2.5, opacity: 0.9,
+        fillColor: '#e94560', fillOpacity: 0.06, dashArray: '8,6',
+      }).addTo(State.map);
+    } catch { /* placeholder circle remains */ }
+  }, 0);
 }
 
 // ── ORS Isochrone ─────────────────────────────────────────
@@ -60,89 +81,107 @@ function sampleBorderPoints(n) {
 
 async function drawOrsIsochrone(mode) {
   if (State.orsLoading) return;
+
+  // Check cache first
+  const cached = isochroneGetCache(mode, State.radiusKm);
+  if (cached) {
+    const color = mode === 'road' ? '#533483' : '#1d9e75';
+    State.orsLayer = L.geoJSON(cached, {
+      style: { color, weight: 2.5, opacity: 0.9, fillColor: color, fillOpacity: 0.07, dashArray: '8,5' },
+    }).addTo(State.map);
+    const label = mode === 'road'
+      ? `${State.radiusKm}km Straße`
+      : `${formatTime(Math.round(State.radiusKm / 100 * 3600))} Fahrzeit`;
+    showToast(`✓ ${label} (Cache)`);
+    document.getElementById('chip-radius-val').textContent = label;
+    return;
+  }
+
   State.orsLoading = true;
 
   const progress = document.getElementById('ors-progress');
   progress.style.display = 'block';
 
-  const rangeType = mode === 'road' ? 'distance' : 'time';
-  const rangeVal  = mode === 'road'
-    ? State.radiusKm * 1000
-    : Math.round(State.radiusKm / 100 * 3600);
+  try {
+    const rangeType = mode === 'road' ? 'distance' : 'time';
+    const rangeVal  = mode === 'road'
+      ? State.radiusKm * 1000
+      : Math.round(State.radiusKm / 100 * 3600);
 
-  const pts      = sampleBorderPoints(ORS_BORDER_SAMPLE_POINTS);
-  const batches  = [];
-  for (let i = 0; i < pts.length; i += ORS_BATCH_SIZE) {
-    batches.push(pts.slice(i, i + ORS_BATCH_SIZE));
-  }
-
-  showToast(`Lade ${mode === 'road' ? 'Straßen-Radius' : 'Fahrzeit-Isochrone'}… (${pts.length} Punkte)`);
-
-  const allPolygons = [];
-  let done = 0;
-
-  for (const [idx, batch] of batches.entries()) {
-    try {
-      const resp = await fetch('https://api.openrouteservice.org/v2/isochrones/driving-car', {
-        method: 'POST',
-        headers: {
-          'Authorization': State.orsKey,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify({ locations: batch, range: [rangeVal], range_type: rangeType, smoothing: 5 }),
-      });
-
-      if (resp.status === 401 || resp.status === 403) {
-        showToast('ORS API-Key ungültig');
-        State.orsLoading = false;
-        progress.style.display = 'none';
-        showOrsKeyPanel();
-        return;
-      }
-
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data.features) allPolygons.push(...data.features);
-      }
-    } catch { /* skip failed batch, continue */ }
-
-    done += batch.length;
-    progress.style.transform = `scaleX(${done / pts.length})`;
-
-    if (idx < batches.length - 1) {
-      await new Promise(r => setTimeout(r, ORS_BATCH_DELAY_MS));
+    const pts     = sampleBorderPoints(ORS_BORDER_SAMPLE_POINTS);
+    const batches = [];
+    for (let i = 0; i < pts.length; i += ORS_BATCH_SIZE) {
+      batches.push(pts.slice(i, i + ORS_BATCH_SIZE));
     }
+
+    showToast(`Lade ${mode === 'road' ? 'Straßen-Radius' : 'Fahrzeit-Isochrone'}… (${pts.length} Punkte)`);
+
+    const allPolygons = [];
+    let done = 0;
+
+    for (const [idx, batch] of batches.entries()) {
+      try {
+        const resp = await fetch('https://api.openrouteservice.org/v2/isochrones/driving-car', {
+          method: 'POST',
+          headers: {
+            'Authorization': State.orsKey,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify({ locations: batch, range: [rangeVal], range_type: rangeType, smoothing: 5 }),
+        });
+
+        if (resp.status === 401 || resp.status === 403) {
+          showToast('ORS API-Key ungültig');
+          progress.style.display = 'none';
+          showOrsKeyPanel();
+          return; // finally still runs
+        }
+
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.features) allPolygons.push(...data.features);
+        }
+      } catch { /* skip failed batch */ }
+
+      done += batch.length;
+      progress.style.transform = `scaleX(${done / pts.length})`;
+
+      if (idx < batches.length - 1) {
+        await new Promise(r => setTimeout(r, ORS_BATCH_DELAY_MS));
+      }
+    }
+
+    progress.style.transform = 'scaleX(1)';
+    setTimeout(() => { progress.style.display = 'none'; progress.style.transform = 'scaleX(0)'; }, 400);
+
+    if (allPolygons.length === 0) {
+      showToast('Keine Daten von ORS erhalten');
+      return;
+    }
+
+    let union = allPolygons[0];
+    for (let i = 1; i < allPolygons.length; i++) {
+      try { union = turf.union(union, allPolygons[i]); } catch { /* skip */ }
+    }
+    try { union = turf.union(union, GERMANY_BORDER); } catch { /* skip */ }
+
+    const color = mode === 'road' ? '#533483' : '#1d9e75';
+    State.orsLayer = L.geoJSON(union, {
+      style: { color, weight: 2.5, opacity: 0.9, fillColor: color, fillOpacity: 0.07, dashArray: '8,5' },
+    }).addTo(State.map);
+
+    isochroneSetCache(mode, State.radiusKm, union);
+
+    const label = mode === 'road'
+      ? `${State.radiusKm}km Straße`
+      : `${formatTime(Math.round(State.radiusKm / 100 * 3600))} Fahrzeit`;
+    showToast(`✓ ${label} geladen (${allPolygons.length} Punkte)`);
+    document.getElementById('chip-radius-val').textContent = label;
+
+  } finally {
+    State.orsLoading = false; // Fix 5: always reset, even on unexpected throw
   }
-
-  progress.style.transform = 'scaleX(1)';
-  setTimeout(() => { progress.style.display = 'none'; progress.style.transform = 'scaleX(0)'; }, 400);
-
-  if (allPolygons.length === 0) {
-    showToast('Keine Daten von ORS erhalten');
-    State.orsLoading = false;
-    return;
-  }
-
-  // Union all polygons + Germany itself into one hull
-  let union = allPolygons[0];
-  for (let i = 1; i < allPolygons.length; i++) {
-    try { union = turf.union(union, allPolygons[i]); } catch { /* skip */ }
-  }
-  try { union = turf.union(union, GERMANY_BORDER); } catch { /* skip */ }
-
-  const color = mode === 'road' ? '#533483' : '#1d9e75';
-  State.orsLayer = L.geoJSON(union, {
-    style: { color, weight: 2.5, opacity: 0.9, fillColor: color, fillOpacity: 0.07, dashArray: '8,5' },
-  }).addTo(State.map);
-
-  const label = mode === 'road'
-    ? `${State.radiusKm}km Straße`
-    : `${formatTime(Math.round(State.radiusKm / 100 * 3600))} Fahrzeit`;
-  showToast(`✓ ${label} geladen (${allPolygons.length} Punkte)`);
-  document.getElementById('chip-radius-val').textContent = label;
-
-  State.orsLoading = false;
 }
 
 // ── Radius mode toggle ────────────────────────────────────
@@ -194,6 +233,17 @@ function initRadiusSliderEvents() {
     localStorage.setItem('radius-km', State.radiusKm);
     document.getElementById('radius-slider-panel').classList.remove('open');
     updateRadiusLabels();
+    if (State.orsLoading) {
+      showToast('ORS-Request läuft noch — Radius wird danach aktualisiert');
+      const modeAtApply = State.radiusMode;
+      const poll = setInterval(() => {
+        if (!State.orsLoading) {
+          clearInterval(poll);
+          if (State.radiusMode === modeAtApply) drawRadius(); // skip if user switched mode
+        }
+      }, 500);
+      return;
+    }
     drawRadius();
     showToast(`Radius: ${State.radiusKm} km`);
   });
@@ -202,20 +252,30 @@ function initRadiusSliderEvents() {
     document.getElementById('radius-slider-panel').classList.remove('open')
   );
 
-  // Long-press on radius button → open slider
+  // Long-press on radius button → open slider (Touch + Mouse)
   let pressTimer;
-  document.getElementById('btn-radius').addEventListener('touchstart', () => {
+  const btnRadius = document.getElementById('btn-radius');
+
+  btnRadius.addEventListener('touchstart', () => {
     pressTimer = setTimeout(openRadiusSlider, 500);
   }, { passive: true });
-  document.getElementById('btn-radius').addEventListener('touchend', () =>
-    clearTimeout(pressTimer), { passive: true }
-  );
+  btnRadius.addEventListener('touchend',   () => clearTimeout(pressTimer), { passive: true });
+  btnRadius.addEventListener('touchmove',  () => clearTimeout(pressTimer), { passive: true });
+
+  btnRadius.addEventListener('mousedown', () => {
+    pressTimer = setTimeout(openRadiusSlider, 500);
+  });
+  btnRadius.addEventListener('mouseup',   () => clearTimeout(pressTimer));
+  btnRadius.addEventListener('mouseleave',() => clearTimeout(pressTimer));
 }
 
 function initOrsEvents() {
   document.getElementById('ors-save-btn').addEventListener('click', () => {
     const key = document.getElementById('ors-key-input').value.trim();
     if (!key) { showToast('Bitte API-Key eingeben'); return; }
+    if (key !== State.orsKey) {
+      isochroneClearCache();  // old key's cached results are invalid
+    }
     State.orsKey = key;
     localStorage.setItem('ors-key', key);
     hideOrsKeyPanel();

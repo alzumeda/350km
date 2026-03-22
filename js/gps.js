@@ -1,6 +1,8 @@
 // ── gps.js ────────────────────────────────────────────────
 // GPS location tracking and user marker.
 
+// Fix 3: uses getSharedRadiusBuffer() from map.js — no local duplicate
+
 function locateUser() {
   const btn = document.getElementById('fab-locate');
   btn.innerHTML = '<span class="spin">◎</span>';
@@ -11,9 +13,11 @@ function locateUser() {
     return;
   }
 
+  // Fix 5: prevent double _onPosition if locateUser is called twice quickly
+  let _called = false;
   navigator.geolocation.getCurrentPosition(
-    pos => _onPosition(pos, btn),
-    ()  => { showToast('GPS-Zugriff verweigert'); btn.innerHTML = '◎'; },
+    pos => { if (_called) return; _called = true; _onPosition(pos, btn); },
+    ()  => { if (_called) return; _called = true; showToast('GPS-Zugriff verweigert'); btn.innerHTML = '◎'; },
     { enableHighAccuracy: true, timeout: 10000 }
   );
 }
@@ -47,8 +51,11 @@ function _onPosition(pos, btn) {
       `${d.driveKm.toFixed(1)} km · ${d.driveMin}min zur Grenze`;
   });
 
-  // Continuous tracking
-  if (State.watchId) navigator.geolocation.clearWatch(State.watchId);
+  // Fix 5: always clear old watch before starting new one
+  if (State.watchId !== null) {
+    navigator.geolocation.clearWatch(State.watchId);
+    State.watchId = null;
+  }
   State.watchId = navigator.geolocation.watchPosition(
     p => {
       State.userPos = [p.coords.latitude, p.coords.longitude];
@@ -62,7 +69,8 @@ function _onPosition(pos, btn) {
 function _isInsideRadius([lat, lng]) {
   try {
     const pt  = turf.point([lng, lat]);
-    const buf = turf.buffer(GERMANY_BORDER, State.radiusKm, { units: 'kilometers', steps: 32 });
+    const buf = getSharedRadiusBuffer(); // Fix 3: shared buffer
+    if (!buf) throw new Error('no buffer');
     return turf.booleanPointInPolygon(pt, buf);
   } catch {
     return distanceKm(lat, lng, GERMANY_CENTER[0], GERMANY_CENTER[1]) <= State.radiusKm + 200;

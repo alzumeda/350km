@@ -44,6 +44,34 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Search ────────────────────────────────────────────
   initSearch();
 
+  document.getElementById('btn-gpx-export').addEventListener('click', exportGpx);
+
+  // ── OCM Key panel ─────────────────────────────────────
+  document.getElementById('ocm-save-btn').addEventListener('click', () => {
+    const key = document.getElementById('ocm-key-input').value.trim();
+    State.ocmKey = key;
+    localStorage.setItem('ocm-key', key);
+    hideOcmKeyPanel();
+    showToast(key ? '✓ OCM API-Key gespeichert' : 'OCM-Key geleert — Fallback auf OSM');
+  });
+  document.getElementById('ocm-cancel-btn').addEventListener('click', hideOcmKeyPanel);
+  document.getElementById('ocm-overlay').addEventListener('click', hideOcmKeyPanel);
+
+  // ── OCM Key Panel ─────────────────────────────────────
+  document.getElementById('ocm-save-btn').addEventListener('click', () => {
+    const key = document.getElementById('ocm-key-input').value.trim();
+    if (!key) { showToast('Bitte API-Key eingeben'); return; }
+    State.ocmKey = key;
+    localStorage.setItem('ocm-key', key);
+    hideOcmKeyPanel();
+    showToast('✓ OpenChargeMap Key gespeichert');
+  });
+  document.getElementById('ocm-cancel-btn').addEventListener('click', hideOcmKeyPanel);
+  document.getElementById('ocm-overlay').addEventListener('click', hideOcmKeyPanel);
+
+  // ── Passes toggle ─────────────────────────────────────
+  document.getElementById('btn-passes').addEventListener('click', togglePassMarkers);
+
   // ── Layer toggle ──────────────────────────────────────
   document.getElementById('btn-layer').addEventListener('click', toggleTileLayer);
 

@@ -53,6 +53,16 @@
     <div class="route-stat"><span class="route-stat-val" id="route-time">–</span><span class="route-stat-lbl">Fahrzeit</span></div>
     <div class="route-stat"><span class="route-stat-val" id="route-border-dist">–</span><span class="route-stat-lbl">ab Grenze</span></div>
   </div>
+  <div id="route-elevation" style="display:none;margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.1)"></div>
+  <div id="route-pass-warnings" style="display:none;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.1)"></div>
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08)">
+    <button id="btn-gpx-export" style="
+      display:none;
+      background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);
+      color:#c0c0c0;font-size:12px;padding:5px 12px;border-radius:8px;
+      cursor:pointer;font-family:system-ui,sans-serif;
+    ">⬇ GPX exportieren</button>
+  </div>
 </div>
 
 <div id="poi-panel">
@@ -73,6 +83,7 @@
     <button class="action-btn" id="btn-radius"><span class="icon">⚙</span><span id="btn-radius-label">Luftlinie</span></button>
     <button class="action-btn" id="btn-route"><span class="icon">🗺</span>Route</button>
     <button class="action-btn" id="btn-poi"><span class="icon">📍</span>Orte</button>
+    <button class="action-btn" id="btn-passes"><span class="icon">🏔</span>Pässe</button>
     <button class="action-btn" id="btn-layer"><span class="icon">🗃</span>Layer</button>
   </div>
 </div>
@@ -111,7 +122,32 @@
   </div>
 </div>
 
+<div id="ocm-overlay"></div>
+<div id="ocm-panel">
+  <h3>⚡ OpenChargeMap API-Key</h3>
+  <p>Für genauere Ladesäulendaten (Echtzeit-Status, verif. Leistung) wird ein kostenloser API-Key benötigt.<br><br>
+  Registrieren auf <a href="https://openchargemap.org/site/developerinfo" target="_blank">openchargemap.org</a> → API Key anfordern (kostenlos, kein Limit).<br><br>
+  Ohne Key: Fallback auf OpenStreetMap-Daten.</p>
+  <input id="ocm-key-input" type="text" placeholder="ocm-api-key hier einfügen…" autocomplete="off" spellcheck="false">
+  <div class="ors-btn-row">
+    <button class="ors-btn" id="ocm-cancel-btn">Abbrechen</button>
+    <button class="ors-btn primary" id="ocm-save-btn">Speichern</button>
+  </div>
+</div>
+
 <div id="ors-progress"></div>
+
+<div id="ocm-overlay"></div>
+<div id="ocm-panel">
+  <h3>⚡ OpenChargeMap API-Key</h3>
+  <p>Für präzisere Ladesäulendaten mit Echtzeit-Status wird ein kostenloser API-Key benötigt.<br><br>
+  Registrieren auf <a href="https://openchargemap.org/site/developerinfo" target="_blank">openchargemap.org</a> → API Key kopieren.</p>
+  <input id="ocm-key-input" type="text" placeholder="ocm-api-key hier einfügen…" autocomplete="off" spellcheck="false">
+  <div class="ors-btn-row">
+    <button class="ors-btn" id="ocm-cancel-btn">Abbrechen</button>
+    <button class="ors-btn primary" id="ocm-save-btn">Speichern &amp; Suchen</button>
+  </div>
+</div>
 
 <div id="ios-banner">
   <div class="ios-icon">📲</div>
@@ -126,14 +162,18 @@
 <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 <script src="js/config.js"></script>
 <script src="js/state.js"></script>
+<script src="js/cache.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/map.js"></script>
 <script src="js/border.js"></script>
+<script src="js/elevation.js"></script>
+<script src="js/passes.js"></script>
 <script src="js/radius.js"></script>
 <script src="js/gps.js"></script>
 <script src="js/routing.js"></script>
 <script src="js/poi.js"></script>
 <script src="js/search.js"></script>
+<script src="js/gpx.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
