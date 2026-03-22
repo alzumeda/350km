@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initMap();
   initRadiusSliderEvents();
   initOrsEvents();
+  _updateOrsKeyBtn(); // show key status on load
 
   // Radius button: tap = toggle mode bar, long-press = open slider (handled in radius.js)
   document.getElementById('btn-radius').addEventListener('click', () => {
@@ -100,3 +101,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // All border distance calculations auto-upgrade once loaded.
   loadHighResBorder();
 });
+
+// ── ORS key button status ──────────────────────────────────
+function _updateOrsKeyBtn() {
+  const btn = document.getElementById('rmode-ors-key-btn');
+  if (!btn) return;
+  const hasKey = !!State.orsKey;
+  btn.textContent = hasKey ? '🔑 ORS ✓' : '🔑 ORS-Key';
+  btn.style.color = hasKey ? '#1d9e75' : '';
+}
