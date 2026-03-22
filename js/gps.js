@@ -1,0 +1,71 @@
+// ── gps.js ────────────────────────────────────────────────
+// GPS location tracking and user marker.
+
+function locateUser() {
+  const btn = document.getElementById('fab-locate');
+  btn.innerHTML = '<span class="spin">◎</span>';
+
+  if (!navigator.geolocation) {
+    showToast('GPS nicht verfügbar');
+    btn.innerHTML = '◎';
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    pos => _onPosition(pos, btn),
+    ()  => { showToast('GPS-Zugriff verweigert'); btn.innerHTML = '◎'; },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
+
+function _onPosition(pos, btn) {
+  State.userPos = [pos.coords.latitude, pos.coords.longitude];
+  _updateUserMarker(State.userPos);
+  State.map.flyTo(State.userPos, 9, { duration: 1.5 });
+  btn.innerHTML = '◉';
+
+  const dist = distanceKm(State.userPos[0], State.userPos[1], GERMANY_CENTER[0], GERMANY_CENTER[1]);
+
+  State.chips.location.classList.add('visible');
+  document.getElementById('chip-loc-text').textContent =
+    `${State.userPos[0].toFixed(2)}°N ${State.userPos[1].toFixed(2)}°E`;
+
+  State.chips.dist.classList.add('visible');
+  document.getElementById('chip-dist-text').textContent = `${Math.round(dist)} km vom Zentrum`;
+
+  const inside = _isInsideRadius(State.userPos);
+  showToast(inside
+    ? `✓ Du bist im Radius (${Math.round(dist)} km vom Zentrum)`
+    : `✗ Außerhalb des Radius (${Math.round(dist)} km vom Zentrum)`
+  );
+
+  // Continuous tracking
+  if (State.watchId) navigator.geolocation.clearWatch(State.watchId);
+  State.watchId = navigator.geolocation.watchPosition(
+    p => { State.userPos = [p.coords.latitude, p.coords.longitude]; _updateUserMarker(State.userPos); },
+    null,
+    { enableHighAccuracy: true, maximumAge: 5000 }
+  );
+}
+
+function _isInsideRadius([lat, lng]) {
+  try {
+    const pt  = turf.point([lng, lat]);
+    const buf = turf.buffer(GERMANY_BORDER, State.radiusKm, { units: 'kilometers', steps: 32 });
+    return turf.booleanPointInPolygon(pt, buf);
+  } catch {
+    return distanceKm(lat, lng, GERMANY_CENTER[0], GERMANY_CENTER[1]) <= State.radiusKm + 200;
+  }
+}
+
+function _updateUserMarker(pos) {
+  if (State.userMarker) State.map.removeLayer(State.userMarker);
+  const icon = L.divIcon({
+    className: '',
+    html: `<div style="width:20px;height:20px;background:#e94560;border-radius:50%;border:3px solid white;box-shadow:0 0 0 4px rgba(233,69,96,0.3);"></div>`,
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+  });
+  State.userMarker = L.marker(pos, { icon }).addTo(State.map);
+  State.userMarker.bindPopup('<b>Dein Standort</b>');
+}
