@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#1a1a2e">
+<meta name="mobile-web-app-capable" content="true">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="DE350">
+<link rel="apple-touch-icon" href="icon-touch.svg">
+<link rel="apple-touch-icon" sizes="152x152" href="icon-touch.svg">
+<link rel="apple-touch-icon" sizes="180x180" href="icon-touch.svg">
+<link rel="apple-touch-icon" sizes="167x167" href="icon-touch.svg">
+<title>Deutschland 350km Radius</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<div id="loading">
+  <div class="loading-ring"></div>
+  <div class="loading-title">DE <span>Radius</span></div>
+  <div class="loading-sub">Karte wird geladen…</div>
+</div>
+
+<div id="map"></div>
+
+<div id="topbar">
+  <div id="app-title">DE<span>350</span></div>
+  <div id="search-wrap">
+    <input id="search-input" type="text" placeholder="Ort suchen…" autocomplete="off" autocorrect="off" spellcheck="false">
+    <button id="search-btn">🔍</button>
+  </div>
+</div>
+
+<div id="search-results"></div>
+<div id="route-mode-banner">📍 Ziel auf Karte tippen für Route</div>
+
+<div id="fab-group">
+  <button class="fab" id="fab-clear" title="Löschen">✕</button>
+  <button class="fab" id="fab-germany" title="Deutschland zentrieren">🇩🇪</button>
+  <button class="fab" id="fab-locate" title="Mein Standort">◎</button>
+</div>
+
+<div id="route-panel">
+  <button id="route-close">✕</button>
+  <h3>Route</h3>
+  <div id="route-stats">
+    <div class="route-stat"><span class="route-stat-val" id="route-dist">–</span><span class="route-stat-lbl">Distanz</span></div>
+    <div class="route-stat"><span class="route-stat-val" id="route-time">–</span><span class="route-stat-lbl">Fahrzeit</span></div>
+    <div class="route-stat"><span class="route-stat-val" id="route-border-dist">–</span><span class="route-stat-lbl">ab Grenze</span></div>
+  </div>
+  <div id="route-crossing" style="display:none;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);font-size:11px;color:#8a8a9a;font-family:system-ui,sans-serif"></div>
+  <div id="route-elevation" style="display:none;margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.1)"></div>
+  <div id="route-pass-warnings" style="display:none;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.1)"></div>
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08)">
+    <button id="btn-gpx-export" style="
+      display:none;
+      background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);
+      color:#c0c0c0;font-size:12px;padding:5px 12px;border-radius:8px;
+      cursor:pointer;font-family:system-ui,sans-serif;
+    ">⬇ GPX exportieren</button>
+  </div>
+</div>
+
+<div id="poi-panel">
+  <div id="poi-header">
+    <h3 id="poi-title">Orte im Radius</h3>
+    <button id="poi-close">✕</button>
+  </div>
+  <div id="poi-list"></div>
+</div>
+
+<div id="bottom-panel">
+  <div id="info-strip">
+    <div class="info-chip" id="chip-radius">Radius: <span id="chip-radius-val">350 km</span></div>
+    <div class="info-chip" id="chip-location">Standort: <span id="chip-loc-text">–</span></div>
+    <div class="info-chip" id="chip-dist">Abstand: <span id="chip-dist-text">–</span></div>
+  </div>
+  <div id="action-row">
+    <button class="action-btn" id="btn-radius"><span class="icon">⚙</span><span id="btn-radius-label">Luftlinie</span></button>
+    <button class="action-btn" id="btn-route"><span class="icon">🗺</span>Route</button>
+    <button class="action-btn" id="btn-poi"><span class="icon">📍</span>Orte</button>
+    <button class="action-btn" id="btn-passes"><span class="icon">🏔</span>Pässe</button>
+    <button class="action-btn" id="btn-layer"><span class="icon">🗃</span>Layer</button>
+    <button class="action-btn" id="btn-settings"><span class="icon">☰</span>Mehr</button>
+  </div>
+</div>
+
+<div id="radius-slider-panel">
+  <div id="rsp-header">
+    <span id="rsp-title">Radius einstellen</span>
+    <button id="rsp-close">✕</button>
+  </div>
+  <div id="rsp-body">
+    <div id="rsp-value-row">
+      <span id="rsp-km-label">350 km</span>
+      <span id="rsp-time-label">≈ 3.5h Fahrzeit</span>
+    </div>
+    <input type="range" id="radius-slider" min="50" max="1000" step="25" value="350">
+    <div id="rsp-ticks"><span>50</span><span>250</span><span>500</span><span>750</span><span>1000</span></div>
+    <button id="rsp-apply-btn">Übernehmen</button>
+  </div>
+</div>
+
+<div id="radius-mode-bar">
+  <button class="rmode-btn active" data-mode="aerial" onclick="setRadiusMode('aerial')">✈ Luftlinie</button>
+  <button class="rmode-btn" id="rmode-road-btn" data-mode="road" onclick="setRadiusMode('road')">🚗 <span id="rmode-road-label">350km</span> Straße</button>
+  <button class="rmode-btn" id="rmode-time-btn" data-mode="time" onclick="setRadiusMode('time')">⏱ <span id="rmode-time-label">3.5h</span> Fahrzeit</button>
+  <button class="rmode-btn" id="rmode-ors-key-btn" onclick="showOrsKeyPanel()" title="ORS API-Key eintragen">🔑 ORS-Key</button>
+</div>
+
+<div id="ors-overlay"></div>
+<div id="ors-panel">
+  <h3>🛣 OpenRouteService API-Key</h3>
+  <p>Für Routen-Isochrone wird ein kostenloser API-Key benötigt.<br><br>
+  Registrieren auf <a href="https://openrouteservice.org/dev/#/login" target="_blank">openrouteservice.org</a> → Dashboard → Token kopieren.<br><br>
+  <span style="color:var(--text-muted)">Free-Tier: 500 Req/Tag · 40 Req/Min<br>
+  Bei Limit: <a href="https://openrouteservice.org/plans/" target="_blank">ORS Premium ab 1€/Monat</a> (2000 Req/Tag)</span></p>
+  <div id="ors-quota-info" style="display:none;font-size:11px;padding:6px 10px;border-radius:6px;background:rgba(233,69,96,0.12);border:1px solid rgba(233,69,96,0.3);color:#e94560;font-family:system-ui,sans-serif"></div>
+  <input id="ors-key-input" type="text" placeholder="ors-api-key hier einfügen…" autocomplete="off" spellcheck="false">
+  <div class="ors-btn-row">
+    <button class="ors-btn" id="ors-cancel-btn">Abbrechen</button>
+    <button class="ors-btn primary" id="ors-save-btn">Speichern &amp; Laden</button>
+  </div>
+</div>
+
+<div id="ocm-overlay"></div>
+<div id="ocm-panel">
+  <h3>⚡ OpenChargeMap API-Key</h3>
+  <p>Für genauere Ladesäulendaten (Echtzeit-Status, verif. Leistung) wird ein kostenloser API-Key benötigt.<br><br>
+  Registrieren auf <a href="https://openchargemap.org/site/developerinfo" target="_blank">openchargemap.org</a> → API Key anfordern (kostenlos, kein Limit).<br><br>
+  Ohne Key: Fallback auf OpenStreetMap-Daten.</p>
+  <input id="ocm-key-input" type="text" placeholder="ocm-api-key hier einfügen…" autocomplete="off" spellcheck="false">
+  <div class="ors-btn-row">
+    <button class="ors-btn" id="ocm-cancel-btn">Abbrechen</button>
+    <button class="ors-btn primary" id="ocm-save-btn">Speichern</button>
+  </div>
+</div>
+
+<div id="ors-progress"></div>
+
+<div id="ocm-overlay"></div>
+<div id="ocm-panel">
+  <h3>⚡ OpenChargeMap API-Key</h3>
+  <p>Für präzisere Ladesäulendaten mit Echtzeit-Status wird ein kostenloser API-Key benötigt.<br><br>
+  Registrieren auf <a href="https://openchargemap.org/site/developerinfo" target="_blank">openchargemap.org</a> → API Key kopieren.</p>
+  <input id="ocm-key-input" type="text" placeholder="ocm-api-key hier einfügen…" autocomplete="off" spellcheck="false">
+  <div class="ors-btn-row">
+    <button class="ors-btn" id="ocm-cancel-btn">Abbrechen</button>
+    <button class="ors-btn primary" id="ocm-save-btn">Speichern &amp; Suchen</button>
+  </div>
+</div>
+
+<div id="settings-overlay"></div>
+<div id="settings-panel">
+  <div id="settings-header">
+    <span>⚙ Einstellungen</span>
+    <button id="settings-close">✕</button>
+  </div>
+
+  <div class="settings-section">
+    <div class="settings-label">API-Keys</div>
+    <button class="settings-row" id="sett-ors-key">
+      <span class="settings-row-icon">🛣</span>
+      <div class="settings-row-text">
+        <div class="settings-row-title">OpenRouteService</div>
+        <div class="settings-row-sub" id="sett-ors-status">Kein Key — OSRM-Näherung aktiv</div>
+      </div>
+      <span class="settings-row-chevron">›</span>
+    </button>
+    <button class="settings-row" id="sett-ocm-key">
+      <span class="settings-row-icon">⚡</span>
+      <div class="settings-row-text">
+        <div class="settings-row-title">OpenChargeMap</div>
+        <div class="settings-row-sub" id="sett-ocm-status">Kein Key — OSM-Fallback aktiv</div>
+      </div>
+      <span class="settings-row-chevron">›</span>
+    </button>
+  </div>
+
+  <div class="settings-section">
+    <div class="settings-label">Export</div>
+    <button class="settings-row" id="sett-gpx-export">
+      <span class="settings-row-icon">⬇</span>
+      <div class="settings-row-text">
+        <div class="settings-row-title">GPX exportieren</div>
+        <div class="settings-row-sub" id="sett-gpx-status">Keine Route berechnet</div>
+      </div>
+      <span class="settings-row-chevron">›</span>
+    </button>
+  </div>
+
+  <div class="settings-section">
+    <div class="settings-label">Routing</div>
+    <div class="settings-row settings-row-static">
+      <span class="settings-row-icon">🛤</span>
+      <div class="settings-row-text">
+        <div class="settings-row-title">Max. Umweg vor Grenzübergang</div>
+        <div class="settings-row-sub" id="sett-crossing-sub">Route kann beliebig lang durch DE führen</div>
+      </div>
+    </div>
+    <div style="padding:0 20px 10px;display:flex;align-items:center;gap:12px">
+      <input type="range" id="sett-crossing-slider" min="5" max="100" step="5" value="30"
+        style="flex:1;accent-color:var(--highlight)">
+      <span id="sett-crossing-val" style="font-size:13px;color:var(--highlight);font-family:system-ui,sans-serif;font-weight:600;min-width:40px">30 km</span>
+    </div>
+    <div style="padding:0 20px 8px;font-size:10px;color:var(--text-muted);font-family:system-ui,sans-serif;line-height:1.5">
+      Wie nah muss die Route an einem Grenzübergang vorbeifahren damit er als "verwendeter Übergang" gilt.<br>
+      Klein = nur direkte Übergänge · Groß = Umwege über weiter entfernte Übergänge erkennbar.
+    </div>
+  </div>
+
+  <div class="settings-section">
+    <div class="settings-label">Cache &amp; Daten</div>
+    <button class="settings-row" id="sett-clear-cache">
+      <span class="settings-row-icon">🗑</span>
+      <div class="settings-row-text">
+        <div class="settings-row-title">ORS-Cache leeren</div>
+        <div class="settings-row-sub" id="sett-cache-status">Berechne…</div>
+      </div>
+    </button>
+  </div>
+
+  <div class="settings-section">
+    <div class="settings-label">Info</div>
+    <div class="settings-row settings-row-static">
+      <span class="settings-row-icon">🗺</span>
+      <div class="settings-row-text">
+        <div class="settings-row-title">Deutschland 350km Radius</div>
+        <div class="settings-row-sub">v1.0 · OpenStreetMap · OSRM · ORS · OCM</div>
+      </div>
+    </div>
+    <div class="settings-row settings-row-static">
+      <span class="settings-row-icon">📦</span>
+      <div class="settings-row-text">
+        <div class="settings-row-title">Datenquellen</div>
+        <div class="settings-row-sub">OSM · Open-Elevation · open-meteo · Nominatim</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="ios-banner">
+  <div class="ios-icon">📲</div>
+  <div class="ios-text">Als App installieren: Tippe auf <b>Teilen ↑</b> → <b>„Zum Home-Bildschirm"</b></div>
+  <button id="ios-banner-close">✕</button>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+<script src="js/config.js"></script>
+<script src="js/state.js"></script>
+<script src="js/cache.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/map.js"></script>
+<script src="js/border.js"></script>
+<script src="js/elevation.js"></script>
+<script src="js/passes.js"></script>
+<script src="js/radius.js"></script>
+<script src="js/gps.js"></script>
+<script src="js/routing.js"></script>
+<script src="js/poi.js"></script>
+<script src="js/search.js"></script>
+<script src="js/gpx.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
