@@ -30,6 +30,7 @@ function initSearch() {
 let _searchAbortCtrl = null;
 
 async function _doSearch(query) {
+  try {
   const results = document.getElementById('search-results');
   results.style.display = 'block';
   results.innerHTML = '<div style="padding:12px 14px;color:var(--text-muted);font-size:13px;font-family:system-ui,sans-serif">Suche…</div>';
@@ -60,12 +61,44 @@ async function _doSearch(query) {
         State.map.flyTo([lat, lon], 12);
         document.getElementById('search-input').value = item.display_name.split(',')[0];
         results.style.display = 'none';
+
+        // Show route button if GPS available — user can tap to route there
+        if (State.userPos) {
+          _showSearchRouteButton(lat, lon, item.display_name.split(',')[0]);
+        }
       });
       results.appendChild(div);
     });
   } catch (err) {
     if (err.name === 'AbortError') return; // Fix 6: silently drop cancelled requests
     results.innerHTML = '<div style="padding:12px 14px;color:var(--text-muted);font-size:13px;font-family:system-ui,sans-serif">Fehler bei der Suche</div>';
+  }
+  } catch(e) { if (e.name !== 'AbortError') console.warn('[search]', e.message); }
+}
+
+/**
+ * Show a "Route berechnen" toast button after a search result is selected.
+ * Tapping it directly starts routing to that location.
+ */
+function _showSearchRouteButton(lat, lon, name) {
+  // Reuse showToast but extend with a callback via a temporary element
+  const toast = document.getElementById('toast');
+  toast.innerHTML = `📍 ${name} <span id="toast-route-btn" style="color:#e94560;font-weight:700;cursor:pointer;text-decoration:underline;margin-left:6px">Route →</span>`;
+  toast.classList.add('show');
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(() => {
+    toast.classList.remove('show');
+    toast.textContent = ''; // reset
+  }, 5000); // longer timeout so user can tap
+
+  const btn = document.getElementById('toast-route-btn');
+  if (btn) {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toast.classList.remove('show');
+      if (!State.userPos) { showToast('Erst GPS-Standort aktivieren (◎)'); return; }
+      _placeDestination(L.latLng(lat, lon));
+    });
   }
 }
 

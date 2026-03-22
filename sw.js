@@ -1,4 +1,4 @@
-const CACHE_APP   = 'de350-app-v4';
+const CACHE_APP   = 'de350-app-v6';
 const CACHE_TILES = 'de350-tiles-v1';
 
 const APP_ASSETS = [
@@ -21,6 +21,7 @@ const APP_ASSETS = [
   './js/poi.js',
   './js/search.js',
   './js/gpx.js',
+  './js/settings.js',
   './js/app.js',
   // CDN libs
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',

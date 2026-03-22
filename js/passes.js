@@ -175,3 +175,126 @@ function showPassWarnings(warnings) {
     `<div style="color:#e94560;font-size:11px;margin-bottom:2px">${w}</div>`
   ).join('');
 }
+
+// ── Mountain context ──────────────────────────────────────
+
+/**
+ * Alpine region bounding box (rough polygon covering Alps + pre-Alps).
+ * Used to detect if a route passes through mountain terrain.
+ */
+const ALPINE_BBOX = {
+  minLat: 45.8, maxLat: 48.5,
+  minLng:  6.0, maxLng: 16.5,
+};
+
+/**
+ * Returns true if a point is within the Alpine bounding box.
+ */
+function isInAlpineRegion(lat, lng) {
+  return lat >= ALPINE_BBOX.minLat && lat <= ALPINE_BBOX.maxLat &&
+         lng >= ALPINE_BBOX.minLng && lng <= ALPINE_BBOX.maxLng;
+}
+
+/**
+ * Returns the fraction of route points that lie in the Alpine region (0–1).
+ */
+function alpineFraction(latLngs) {
+  if (!latLngs.length) return 0;
+  const alpineCount = latLngs.filter(p => isInAlpineRegion(p.lat, p.lng)).length;
+  return alpineCount / latLngs.length;
+}
+
+/**
+ * Estimate an effective average speed for a route based on:
+ * - Alpine fraction of the route
+ * - Elevation profile (total ascent per km → steepness)
+ *
+ * Returns speed in km/h.
+ */
+function estimateRouteSpeed(latLngs, elevations) {
+  const fraction = alpineFraction(latLngs);
+
+  // Base speed
+  let speed = 85; // km/h flat mixed roads
+
+  // Alpine region penalty: scale linearly 85→65 km/h as fraction goes 0→1
+  if (fraction > 0.05) {
+    speed = 85 - fraction * (85 - 65);
+  }
+
+  // Steepness penalty from elevation profile
+  if (elevations && elevations.length > 1) {
+    const totalKm = latLngs.length > 1
+      ? turf.length(turf.lineString(latLngs.map(p => [p.lng, p.lat])), { units: 'kilometers' })
+      : 1;
+    let ascent = 0;
+    for (let i = 1; i < elevations.length; i++) {
+      const diff = elevations[i] - elevations[i - 1];
+      if (diff > 0) ascent += diff;
+    }
+    const ascentPerKm = ascent / (totalKm || 1); // m/km
+    // > 10m/km = hilly, > 25m/km = steep mountain road
+    if (ascentPerKm > 25) speed = Math.min(speed, 60);
+    else if (ascentPerKm > 10) speed = Math.min(speed, 72);
+  }
+
+  return Math.round(speed);
+}
+
+/**
+ * Tunnel alternatives for closed passes.
+ * When a route passes near a closed pass, suggest the corresponding tunnel.
+ */
+const PASS_TUNNELS = {
+  'Arlbergpass':               { name: 'Arlberg-Straßentunnel', url: 'https://www.arlbergtunnel.at' },
+  'Gotthard (Passstraße)':     { name: 'Gotthard-Basistunnel (Bahn) / Straßentunnel', url: null },
+  'Timmelsjoch':               { name: 'Brennerautobahn (A13/A22)', url: null },
+  'Großglockner-Hochalpenstraße': { name: 'Tauernautobahn (A10)', url: null },
+  'Silvretta-Hochalpenstraße': { name: 'Arlberg-Tunnel oder Reschenpass', url: null },
+  'Nufenenpass':               { name: 'Gotthard-Straßentunnel', url: null },
+  'Grimselpass':               { name: 'Lötschberg-Basistunnel (Bahn)', url: null },
+  'Furkapass':                 { name: 'Furka-Autoverlad (Bahn)', url: 'https://www.matterhorngotthardbahn.ch' },
+};
+
+/**
+ * Build pass warnings with tunnel alternatives for closed passes.
+ * Extends the basic checkPassWarnings result.
+ */
+function checkPassWarningsWithAlternatives(latLngs, thresholdKm = 15) {
+  if (!latLngs.length) return [];
+
+  const pad    = thresholdKm / 111;
+  let minLat =  Infinity, maxLat = -Infinity;
+  let minLng =  Infinity, maxLng = -Infinity;
+  for (const p of latLngs) {
+    if (p.lat < minLat) minLat = p.lat;
+    if (p.lat > maxLat) maxLat = p.lat;
+    if (p.lng < minLng) minLng = p.lng;
+    if (p.lng > maxLng) maxLng = p.lng;
+  }
+  minLat -= pad; maxLat += pad;
+  minLng -= pad; maxLng += pad;
+
+  const results = [];
+
+  for (const pass of ALPINE_PASSES) {
+    if (!_isCurrentlyClosed(pass)) continue;
+    if (pass.lat < minLat || pass.lat > maxLat ||
+        pass.lng < minLng || pass.lng > maxLng) continue;
+
+    const passPt = turf.point([pass.lng, pass.lat]);
+    const near   = latLngs.some(p =>
+      turf.distance(turf.point([p.lng, p.lat]), passPt, { units: 'kilometers' }) <= thresholdKm
+    );
+    if (!near) continue;
+
+    const tunnel = PASS_TUNNELS[pass.name];
+    results.push({
+      pass,
+      warning: `⛔ ${pass.name} (${pass.alt} m) – ${pass.note}`,
+      alternative: tunnel ? `→ Alternative: ${tunnel.name}` : null,
+    });
+  }
+
+  return results;
+}

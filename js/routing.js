@@ -175,18 +175,8 @@ function _placeDestination(destLatLng) {
   if (State.routeControl) { State.map.removeControl(State.routeControl); State.routeControl = null; }
   showToast('Route wird berechnet…');
 
-  // Aerial border distance immediately in panel
-  const { km: bKm } = aerialDistToBorder(lat, lng);
-  document.getElementById('route-border-dist').textContent =
-    bKm !== null ? (bKm < 0 ? `${Math.round(-bKm)} km (in DE)` : `+${Math.round(bKm)} km`) : '–';
-
-  // Async driving update
-  drivingDistToBorder(lat, lng).then(d => {
-    if (!d) return;
-    const within = d.driveKm <= State.radiusKm;
-    document.getElementById('route-border-dist').textContent =
-      `${d.driveKm.toFixed(1)} km ${within ? '✓' : '✗'}`;
-  });
+  // 'ab Grenze' will be updated after route is found + crossing detected
+  document.getElementById('route-border-dist').textContent = '…';
 
   State.routeControl = L.Routing.control({
     waypoints: [L.latLng(...State.userPos), L.latLng(lat, lng)],
@@ -206,31 +196,67 @@ function _placeDestination(destLatLng) {
   }).addTo(State.map);
 
   State.routeControl.on('routesfound', ev => {
-    const r    = ev.routes[0];
-    const km   = (r.summary.totalDistance / 1000).toFixed(1);
-    const mins = Math.round(r.summary.totalTime / 60);
-    const hrs  = Math.floor(mins / 60);
-    const min  = mins % 60;
+    const r   = ev.routes[0];
+    const km  = (r.summary.totalDistance / 1000).toFixed(1);
+    // OSRM gives raw driving time — use it directly for display
+    const osrmMins = Math.round(r.summary.totalTime / 60);
+
     document.getElementById('route-dist').textContent    = `${km} km`;
-    document.getElementById('route-time').textContent    = hrs > 0 ? `${hrs}h ${min}min` : `${mins} min`;
+    document.getElementById('route-time').textContent    = _fmtMin(osrmMins);
     document.getElementById('route-panel').style.display = 'block';
     document.getElementById('fab-clear').style.display   = 'flex';
-    document.getElementById('btn-gpx-export').style.display = 'inline-block'; // Fix 7
+    document.getElementById('btn-gpx-export').style.display = 'inline-block';
     showToast(`Route: ${km} km`);
 
     // Robust coordinate extraction
     const latLngs = _extractRouteCoords(r);
-
-    // Store coords for GPX export
     State.lastRouteCoords = latLngs;
 
-    // Elevation profile
-    if (latLngs.length) fetchAndShowElevation(latLngs);
+    // Mountain context: detect alpine fraction immediately
+    const fraction = alpineFraction(latLngs);
+    if (fraction > 0.15) {
+      const pct = Math.round(fraction * 100);
+      showToast(`🏔 ${pct}% der Route im Alpenraum — Fahrzeit kann abweichen`);
+    }
 
-    // Pass warnings
-    const warnings = checkPassWarnings(latLngs);
-    showPassWarnings(warnings);
-    if (warnings.length) showToast(`⚠ ${warnings.length} Pass${warnings.length > 1 ? 'sperren' : 'sperre'} auf der Route`);
+    // Elevation profile — also used for speed correction
+    if (latLngs.length) {
+      fetchAndShowElevation(latLngs).then(() => {
+        _showCorrectedTime(latLngs, parseFloat(km), osrmMins);
+      }).catch(e => console.warn('[routing] elevation:', e.message));
+    }
+
+    // Pass warnings with tunnel alternatives
+    const passResults = checkPassWarningsWithAlternatives(latLngs);
+    _showPassWarningsWithAlternatives(passResults);
+    if (passResults.length) {
+      showToast(`⚠ ${passResults.length} gesperrter Pass auf der Route — Alternativen beachten`);
+    }
+
+    // Detect which border crossing the route uses
+    const routeCrossing = detectRouteCrossing(latLngs, State.crossingMaxDistKm);
+    _showRouteCrossing(latLngs);
+
+    // Fix 2: update 'ab Grenze' to show distance from user to the ROUTE crossing
+    if (routeCrossing && State.userPos) {
+      const [uLat, uLng] = State.userPos;
+      // Aerial distance from user to the crossing used
+      const aerialToC = turf.distance(
+        turf.point([uLng, uLat]),
+        turf.point([routeCrossing.lng, routeCrossing.lat]),
+        { units: 'kilometers' }
+      );
+      document.getElementById('route-border-dist').textContent =
+        `${Math.round(aerialToC)} km`;
+      // Then async driving distance to that crossing
+      _osrmDistToPoint(uLat, uLng, routeCrossing.lat, routeCrossing.lng)
+        .then(res => {
+          if (!res) return;
+          const within = res.driveKm <= State.radiusKm;
+          const bdEl = document.getElementById('route-border-dist');
+          if (bdEl) bdEl.textContent = `${res.driveKm.toFixed(1)} km ${within ? '✓' : '✗'}`;
+        }).catch(e => console.warn('[routing] border dist:', e.message));
+    }
   });
 
   State.routeControl.on('routingerror', () => showToast('Route konnte nicht berechnet werden'));
@@ -314,8 +340,11 @@ function _popupHtml({ lat, lng, aerialLabel, driving, aerialKm }) {
   const candidatesTxt = driving?.candidatesUsed > 1
     ? `<span style="font-size:10px;color:#666"> (beste von ${driving.candidatesUsed} Grenzpunkten)</span>`
     : '';
+  const crossingHtml = driving?.crossingName
+    ? `<span style="font-size:10px;color:#8a8a9a"> via ${driving.crossingName}</span>`
+    : '';
   const driveHtml = driving
-    ? `🚗 Fahrweg: <b>${driving.driveKm.toFixed(1)} km · ${_fmtMin(driving.driveMin)}</b>${candidatesTxt}<br>${diffHtml}`
+    ? `🚗 Fahrweg: <b>${driving.driveKm.toFixed(1)} km · ${_fmtMin(driving.driveMin)}</b>${candidatesTxt}${crossingHtml}<br>${diffHtml}`
     : `<span style="color:#8a8a9a;font-size:11px">🚗 Fahrweg wird berechnet…</span>`;
 
   return `
@@ -334,6 +363,109 @@ function _fmtMin(min) {
   return h > 0 ? `${h}h${m > 0 ? ' ' + m + 'min' : ''}` : `${min}min`;
 }
 
+/**
+ * After elevation data loads: compute terrain-corrected travel time
+ * and show it alongside the OSRM time in the route panel.
+ */
+function _showCorrectedTime(latLngs, km, osrmMins) {
+  const elevations = State.lastElevations;
+  const speed      = estimateRouteSpeed(latLngs, elevations);
+  const corrMins   = Math.round((km / speed) * 60);
+
+  // Only show correction if meaningfully different from OSRM (>5%)
+  const diff = Math.abs(corrMins - osrmMins);
+  if (diff < osrmMins * 0.05 || !elevations) return;
+
+  const timeEl = document.getElementById('route-time');
+  if (!timeEl) return;
+
+  const osrmStr = _fmtMin(osrmMins);
+  const corrStr = _fmtMin(corrMins);
+  const icon    = speed <= 65 ? '🏔' : speed <= 72 ? '⛰' : '';
+
+  // Show both: OSRM (GPS-nav) and terrain-corrected estimate
+  timeEl.innerHTML = `
+    <span title="OSRM-Navigationszeit">${osrmStr}</span>
+    <br><span style="font-size:11px;color:#8a8a9a" title="Terrainkorrigierte Schätzung (${speed}km/h)">${icon} ~${corrStr} inkl. Terrain</span>`;
+}
+
+/**
+ * Show pass warnings with tunnel alternatives in the route panel.
+ */
+function _showPassWarningsWithAlternatives(results) {
+  const el = document.getElementById('route-pass-warnings');
+  if (!el) return;
+
+  if (!results.length) {
+    el.innerHTML = '';
+    el.style.display = 'none';
+    return;
+  }
+
+  el.style.display = 'block';
+  el.innerHTML = results.map(r => {
+    const altHtml = r.alternative
+      ? `<div style="color:#8a8a9a;font-size:10px;margin-top:1px">${r.alternative}</div>`
+      : '';
+    return `<div style="margin-bottom:4px">
+      <div style="color:#e94560;font-size:11px">${r.warning}</div>
+      ${altHtml}
+    </div>`;
+  }).join('');
+}
+
+/**
+ * Detect and display the border crossing used by the route.
+ * Uses State.crossingMaxDistKm as the proximity threshold.
+ */
+/**
+ * OSRM driving distance from (fromLat,fromLng) to (toLat,toLng).
+ * Returns { driveKm, driveMin } or null.
+ */
+async function _osrmDistToPoint(fromLat, fromLng, toLat, toLng) {
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/` +
+      `${fromLng},${fromLat};${toLng},${toLat}?overview=false`;
+    const ctrl = new AbortController();
+    const tid  = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const resp = await fetch(url, { signal: ctrl.signal });
+      if (!resp.ok) return null;
+      const data = await resp.json();
+      if (data.code !== 'Ok' || !data.routes?.length) return null;
+      return {
+        driveKm:  data.routes[0].distance / 1000,
+        driveMin: Math.round(data.routes[0].duration / 60),
+      };
+    } finally { clearTimeout(tid); }
+  } catch { return null; }
+}
+
+function _showRouteCrossing(latLngs) {
+  const el = document.getElementById('route-crossing');
+  if (!el) return;
+
+  const crossing = detectRouteCrossing(latLngs, State.crossingMaxDistKm);
+
+  if (!crossing) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+
+  const neighborFlag = {
+    NL: '🇳🇱', BE: '🇧🇪', LU: '🇱🇺', FR: '🇫🇷',
+    CH: '🇨🇭', AT: '🇦🇹', CZ: '🇨🇿', PL: '🇵🇱', DK: '🇩🇰',
+  };
+  const flag = crossing.neighbor ? (neighborFlag[crossing.neighbor] || '🏁') : '🏁';
+
+  el.style.display = 'block';
+  el.innerHTML = `
+    <span style="color:var(--text-muted)">Grenzübergang:</span>
+    <span style="color:var(--text);font-weight:500;margin-left:4px">${flag} ${crossing.name}</span>
+    ${crossing.distKm < 2 ? '' : `<span style="color:var(--text-muted);font-size:10px"> (~${crossing.distKm}km von Route)</span>`}`;
+}
+
 function clearRoute() {
   if (State.routeControl)      { State.map.removeControl(State.routeControl);    State.routeControl      = null; }
   if (State.destinationMarker) {
@@ -343,7 +475,9 @@ function clearRoute() {
   State.lastRouteCoords = null;
   document.getElementById('route-panel').style.display = 'none';
   document.getElementById('fab-clear').style.display   = 'none';
-  document.getElementById('btn-gpx-export').style.display = 'none'; // Fix 7
+  document.getElementById('btn-gpx-export').style.display = 'none';
+  const crossEl = document.getElementById('route-crossing');
+  if (crossEl) { crossEl.style.display = 'none'; crossEl.innerHTML = ''; }
   clearElevation();
   showPassWarnings([]);
 }
