@@ -236,8 +236,8 @@ async function fetchAndShowElevation(latLngs) {
   }
 
   // Store for GPX export
-  window._lastElevations = elevations;
-  window._lastElevSamples = samples;
+  State.lastElevations = elevations;
+  State.lastElevSamples = samples;
 
   const { ascent, descent, maxAlt, minAlt } = _elevationStats(elevations);
 
@@ -259,6 +259,6 @@ async function fetchAndShowElevation(latLngs) {
 function clearElevation() {
   const el = document.getElementById('route-elevation');
   if (el) { el.style.display = 'none'; el.innerHTML = ''; }
-  window._lastElevations  = null;
-  window._lastElevSamples = null;
+  State.lastElevations  = null;
+  State.lastElevSamples = null;
 }

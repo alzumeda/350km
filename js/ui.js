@@ -19,7 +19,7 @@ function formatTime(seconds) {
 
 function updateRadiusLabels() {
   const km   = State.radiusKm;
-  const secs = Math.round(km / 100 * 3600);
+  const secs = Math.round(km / 85 * 3600);
   const mode = State.radiusMode;
 
   const chipText =

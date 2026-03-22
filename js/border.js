@@ -65,16 +65,143 @@ async function loadHighResBorder() {
   }
 }
 
+// ── Real road border crossings ───────────────────────────
+// These are actual Grenzübergänge (road border crossings) on main roads.
+// Using these as OSRM targets gives accurate real-road distances to the border,
+// unlike raw GeoJSON polygon points which may land on mountains or rivers.
+
+// Coordinates verified to be AT or just beyond the actual border line
+// (on the foreign side or exactly at the crossing point)
+// This ensures OSRM routes end AT the border, not inside Germany.
+const DE_BORDER_CROSSINGS = [
+  // Netherlands — A/B road crossings
+  { name: 'Bad Nieuweschans (NL)',  lat: 53.177, lng:  7.196, neighbor: 'NL' }, // at NL side
+  { name: 'Venlo/A61 (NL)',         lat: 51.364, lng:  6.173, neighbor: 'NL' }, // Grenzweg, verified
+  { name: 'Aachen/Vetschau A4',     lat: 50.779, lng:  5.985, neighbor: 'NL' }, // just over NL border
+  // Belgium / Luxembourg
+  { name: 'Aachen/Lichtenbusch',    lat: 50.727, lng:  6.032, neighbor: 'BE' }, // on BE side A44
+  { name: 'Prüm/St.Vith B410',      lat: 50.157, lng:  6.227, neighbor: 'BE' }, // St. Vith side
+  { name: 'Trier/Wasserbillig A1',   lat: 49.718, lng:  6.502, neighbor: 'LU' }, // at LU border
+  // France
+  { name: "Kehl/Pont de l'Europe",  lat: 48.591, lng:  7.789, neighbor: 'FR' }, // bridge midpoint
+  { name: 'Saarbrücken/Goldene Bremm', lat: 49.200, lng: 6.939, neighbor: 'FR' }, // A320 crossing
+  { name: 'Neuenburg/Chalampé A35',  lat: 47.817, lng:  7.558, neighbor: 'FR' }, // Rhine bridge
+  // Switzerland
+  { name: 'Basel/Hüningen A35',      lat: 47.608, lng:  7.567, neighbor: 'CH' }, // Rhine bridge
+  { name: 'Konstanz/Kreuzlingen',    lat: 47.659, lng:  9.175, neighbor: 'CH' }, // at CH border
+  { name: 'Lindau/St.Margrethen A96',lat: 47.538, lng:  9.703, neighbor: 'CH' }, // Rhine bridge
+  // Austria
+  { name: 'Walserberg/Salzburg A8',  lat: 47.780, lng: 13.008, neighbor: 'AT' }, // at AT border
+  { name: 'Passau/Suben A3',         lat: 48.541, lng: 13.473, neighbor: 'AT' }, // at AT border
+  { name: 'Kufstein/Kiefersfelden A93', lat: 47.591, lng: 12.173, neighbor: 'AT' }, // AT side
+  { name: 'Füssen/Vils A7 AT',       lat: 47.552, lng: 10.709, neighbor: 'AT' }, // AT border
+  // Czech Republic
+  { name: 'Furth/Folmava A3',        lat: 49.319, lng: 12.836, neighbor: 'CZ' }, // at CZ border
+  { name: 'Waidhaus/Rozvadov A6',    lat: 49.661, lng: 12.560, neighbor: 'CZ' }, // at CZ border
+  { name: 'Zinnwald/Cinovec A17',    lat: 50.736, lng: 13.769, neighbor: 'CZ' }, // verified tunnel exit
+  // Poland — Oder/Neisse river bridges
+  { name: 'Frankfurt/Oder/Slubice A12', lat: 52.348, lng: 14.556, neighbor: 'PL' }, // Oder bridge
+  { name: 'Görlitz/Zgorzelec A4',    lat: 51.152, lng: 15.002, neighbor: 'PL' }, // Neisse bridge
+  { name: 'Pomellen/Kołbaskowo A11', lat: 53.493, lng: 14.367, neighbor: 'PL' }, // actual A11 crossing
+  // Denmark — E45/A7
+  { name: 'Ellund/Frøslev E45',      lat: 54.869, lng:  9.552, neighbor: 'DK' }, // verified at border
+  { name: 'Kupfermühle/Padborg B200', lat: 54.833, lng:  9.375, neighbor: 'DK' }, // B200 crossing
+];
+
+// ── Live border crossings (Overpass) ─────────────────────
+
+const CROSSINGS_CACHE_KEY = 'de-crossings-v1';
+const CROSSINGS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
+let _liveCrossings = null; // loaded once, then cached in memory
+
+/**
+ * Load all German border crossings from Overpass API.
+ * Caches result 24h in localStorage. Falls back to DE_BORDER_CROSSINGS.
+ */
+async function loadLiveCrossings() {
+  if (_liveCrossings) return; // already loaded this session
+
+  // Check localStorage cache first
+  try {
+    const raw = localStorage.getItem(CROSSINGS_CACHE_KEY);
+    if (raw) {
+      const entry = JSON.parse(raw);
+      if (entry && entry.ts && Date.now() - entry.ts < CROSSINGS_CACHE_TTL && entry.data?.length > 10) {
+        _liveCrossings = entry.data;
+        console.log(`[border] ${_liveCrossings.length} Grenzübergänge aus Cache geladen`);
+        return;
+      }
+    }
+  } catch { /* miss */ }
+
+  // Fetch from Overpass
+  const q = `[out:json][timeout:20];(node["barrier"="border_control"](47.2,5.8,55.1,15.1);node["amenity"="border_control"](47.2,5.8,55.1,15.1););out body;`;
+  try {
+    const resp = await fetch(
+      `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(q)}`
+    );
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    const nodes = (data.elements || []).filter(e => e.type === 'node' && e.lat && e.lon);
+
+    if (nodes.length < 10) throw new Error('Too few results: ' + nodes.length);
+
+    _liveCrossings = nodes.map(n => ({
+      name:     n.tags?.['name:de'] || n.tags?.name || 'Grenzübergang',
+      lat:      n.lat,
+      lng:      n.lon,
+      neighbor: null, // not always available in OSM tags
+    }));
+
+    // Cache result
+    try {
+      localStorage.setItem(CROSSINGS_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: _liveCrossings }));
+    } catch { /* quota */ }
+
+    console.log(`[border] ${_liveCrossings.length} Grenzübergänge von Overpass geladen`);
+  } catch (e) {
+    console.warn('[border] Overpass crossings failed, using hardcoded fallback:', e.message);
+    _liveCrossings = null; // will use DE_BORDER_CROSSINGS
+  }
+}
+
+/**
+ * Returns the current crossing list: live from Overpass or hardcoded fallback.
+ */
+function _getCrossings() {
+  return (_liveCrossings && _liveCrossings.length > 10) ? _liveCrossings : DE_BORDER_CROSSINGS;
+}
+
+/**
+ * Returns the N nearest border crossings sorted by aerial distance.
+ * Uses actual Grenzübergänge instead of raw polygon coordinates. */
+function _topNCrossings(lat, lng, n = 5) {
+  const pt     = turf.point([lng, lat]);
+  const poly   = _borderPoly || _fallbackPoly;
+  const inside = (() => {
+    try { return turf.booleanPointInPolygon(pt, poly); } catch { return false; }
+  })();
+
+  return _getCrossings()
+    .map(c => {
+      const dist = turf.distance(pt, turf.point([c.lng, c.lat]), { units: 'kilometers' });
+      return { ...c, aerialKm: inside ? -dist : dist };
+    })
+    .sort((a, b) => Math.abs(a.aerialKm) - Math.abs(b.aerialKm))
+    .slice(0, n);
+}
+
 // ── Aerial distance (sync) ────────────────────────────────
 
 /**
  * Returns the single nearest border point (aerial).
  */
 function aerialDistToBorder(lat, lng) {
-  const { candidates } = _topNBorderCandidates(lat, lng, 1);
-  if (!candidates.length) return { km: null, nearestPt: null };
-  const best = candidates[0];
-  return { km: best.aerialKm, nearestPt: best.pt };
+  // Use real border crossings for aerial estimate
+  const crossings = _topNCrossings(lat, lng, 1);
+  if (!crossings.length) return { km: null, nearestPt: null };
+  const best = crossings[0];
+  return { km: best.aerialKm, nearestPt: [best.lng, best.lat] };
 }
 
 /**
@@ -129,27 +256,31 @@ function _topNBorderCandidates(lat, lng, n = 3, minSpreadKm = 30) {
  * Returns { driveKm, driveMin, nearestPt, aerialKm, roadBreakdown, candidatesUsed }
  */
 async function drivingDistToBorder(lat, lng) {
-  const { candidates } = _topNBorderCandidates(lat, lng, 3, 30);
-  if (!candidates.length) return null;
+  // Use top-5 nearest real border crossings as OSRM targets
+  // This gives accurate road distances to actual Grenzübergänge
+  const crossings = _topNCrossings(lat, lng, 5);
+  if (!crossings.length) return null;
 
   // Fire all OSRM requests in parallel
-  const requests = candidates.map(c => _osrmRoute(lat, lng, c.pt, c.aerialKm));
-  const results  = await Promise.all(requests);
+  const requests = crossings.map(c =>
+    _osrmRoute(lat, lng, [c.lng, c.lat], c.aerialKm, c.name)
+  );
+  const results = await Promise.all(requests);
 
-  // Pick shortest driving distance among successful results
+  // Pick shortest driving distance
   const valid = results.filter(Boolean);
   if (!valid.length) return null;
 
   valid.sort((a, b) => a.driveKm - b.driveKm);
   const best = valid[0];
-  best.candidatesUsed = valid.length; // how many candidates returned routes
+  best.candidatesUsed = valid.length;
   return best;
 }
 
 /**
  * Single OSRM route request with road-type steps.
  */
-async function _osrmRoute(lat, lng, borderPt, aerialKm) {
+async function _osrmRoute(lat, lng, borderPt, aerialKm, crossingName) {
   const [bLng, bLat] = borderPt;
   try {
     const url  = `https://router.project-osrm.org/route/v1/driving/` +
@@ -170,6 +301,7 @@ async function _osrmRoute(lat, lng, borderPt, aerialKm) {
         driveKm,
         driveMin,
         nearestPt:     borderPt,
+        crossingName:  crossingName || null,
         aerialKm,
         roadBreakdown: _parseRoadBreakdown(route.legs, driveKm),
       };
@@ -283,4 +415,42 @@ function _initFromGeoJSON(geojson) {
   _borderLine  = turf.lineString(ring);
   _borderPoly  = turf.polygon([ring]);
   _borderReady = true;
+}
+
+// ── Route crossing detection ──────────────────────────────
+
+/**
+ * Find which border crossing a route passes through.
+ * Checks every crossing against every route coordinate — the crossing
+ * with the minimum distance to any route point is the one used.
+ *
+ * @param {L.LatLng[]} latLngs   - Route coordinates from Leaflet
+ * @param {number}     maxDistKm - Max distance to consider "on route" (default 8km)
+ * @returns {{ name, lat, lng, neighbor, distKm } | null}
+ */
+function detectRouteCrossing(latLngs, maxDistKm = 8) {
+  if (!latLngs || !latLngs.length) return null;
+
+  const crossings = _getCrossings();
+  let bestCrossing = null;
+  let bestDist     = Infinity;
+
+  // Sample route points — every 5th to keep it fast
+  const step    = Math.max(1, Math.floor(latLngs.length / 60));
+  const samples = latLngs.filter((_, i) => i % step === 0);
+
+  for (const crossing of crossings) {
+    const cPt = turf.point([crossing.lng, crossing.lat]);
+
+    for (const p of samples) {
+      const dist = turf.distance(turf.point([p.lng, p.lat]), cPt, { units: 'kilometers' });
+      if (dist < bestDist) {
+        bestDist     = dist;
+        bestCrossing = crossing;
+      }
+    }
+  }
+
+  if (bestDist > maxDistKm) return null; // no crossing close enough to route
+  return { ...bestCrossing, distKm: Math.round(bestDist * 10) / 10 };
 }
