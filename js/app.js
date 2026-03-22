@@ -66,4 +66,9 @@ document.addEventListener('DOMContentLoaded', () => {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
+
+  // ── High-res DE border (async, non-blocking) ──────────
+  // Loads ~5000-point OSM border into sessionStorage cache.
+  // All border distance calculations auto-upgrade once loaded.
+  loadHighResBorder();
 });

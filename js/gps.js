@@ -24,25 +24,36 @@ function _onPosition(pos, btn) {
   State.map.flyTo(State.userPos, 9, { duration: 1.5 });
   btn.innerHTML = '◉';
 
-  const dist = distanceKm(State.userPos[0], State.userPos[1], GERMANY_CENTER[0], GERMANY_CENTER[1]);
-
+  // Location chip
   State.chips.location.classList.add('visible');
   document.getElementById('chip-loc-text').textContent =
     `${State.userPos[0].toFixed(2)}°N ${State.userPos[1].toFixed(2)}°E`;
 
+  // Border distance chip — aerial first, then driving
   State.chips.dist.classList.add('visible');
-  document.getElementById('chip-dist-text').textContent = `${Math.round(dist)} km vom Zentrum`;
+  const { km: bKm } = aerialDistToBorder(State.userPos[0], State.userPos[1]);
+  const aerialTxt = bKm === null ? '–'
+    : bKm < 0 ? `${Math.round(-bKm)} km in DE`
+    : `+${Math.round(bKm)} km außerhalb`;
+  document.getElementById('chip-dist-text').textContent = aerialTxt;
 
   const inside = _isInsideRadius(State.userPos);
-  showToast(inside
-    ? `✓ Du bist im Radius (${Math.round(dist)} km vom Zentrum)`
-    : `✗ Außerhalb des Radius (${Math.round(dist)} km vom Zentrum)`
-  );
+  showToast(inside ? `✓ Im Radius — ${aerialTxt}` : `✗ Außerhalb — ${aerialTxt}`);
+
+  // Async: update chip with driving distance
+  drivingDistToBorder(State.userPos[0], State.userPos[1]).then(d => {
+    if (!d) return;
+    document.getElementById('chip-dist-text').textContent =
+      `${d.driveKm.toFixed(1)} km · ${d.driveMin}min zur Grenze`;
+  });
 
   // Continuous tracking
   if (State.watchId) navigator.geolocation.clearWatch(State.watchId);
   State.watchId = navigator.geolocation.watchPosition(
-    p => { State.userPos = [p.coords.latitude, p.coords.longitude]; _updateUserMarker(State.userPos); },
+    p => {
+      State.userPos = [p.coords.latitude, p.coords.longitude];
+      _updateUserMarker(State.userPos);
+    },
     null,
     { enableHighAccuracy: true, maximumAge: 5000 }
   );
