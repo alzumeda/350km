@@ -36,32 +36,62 @@ function _onPosition(pos, btn) {
   // Border distance chip — aerial first, then driving
   State.chips.dist.classList.add('visible');
   const { km: bKm } = aerialDistToBorder(State.userPos[0], State.userPos[1]);
+  const nearCrossing = _topNCrossings(State.userPos[0], State.userPos[1], 1)[0] || null;
+  const _dir = nearCrossing ? (() => {
+    const b = _bearing(State.userPos[0], State.userPos[1], nearCrossing.lat, nearCrossing.lng);
+    const {arrow, compass} = _bearingToDirection(b);
+    const flag = _countryFlag(nearCrossing.neighbor);
+    return `${arrow} ${compass}${flag ? ' '+flag : ''}`;
+  })() : '';
   const aerialTxt = bKm === null ? '–'
-    : bKm < 0 ? `${Math.round(-bKm)} km in DE`
+    : bKm < 0 ? `${Math.round(-bKm)} km in DE${_dir ? ' · '+_dir : ''}`
     : `+${Math.round(bKm)} km außerhalb`;
   document.getElementById('chip-dist-text').textContent = aerialTxt;
 
   const inside = _isInsideRadius(State.userPos);
   showToast(inside ? `✓ Im Radius — ${aerialTxt}` : `✗ Außerhalb — ${aerialTxt}`);
 
-  // Async: update chip with driving distance
+  // Async: update with driving distance + direction
   drivingDistToBorder(State.userPos[0], State.userPos[1]).then(d => {
     if (!d) return;
-    document.getElementById('chip-dist-text').textContent =
-      `${d.driveKm.toFixed(1)} km · ${d.driveMin}min zur Grenze`;
-  });
+    const el = document.getElementById('chip-dist-text');
+    if (!el) return;
+    const h = Math.floor(d.driveMin/60), m = d.driveMin%60;
+    const tStr = h > 0 ? `${h}h${m>0?' '+m+'min':''}` : `${d.driveMin}min`;
+    const dirFmt = formatBorderWithDirection(
+      State.userPos[0], State.userPos[1], d.crossing || nearCrossing, d.driveKm
+    );
+    el.textContent = `${dirFmt || d.driveKm.toFixed(1)+' km'} · ${tStr}`;
+  }).catch(e => console.warn('[gps] border dist:', e.message));
 
   // Fix 5: always clear old watch before starting new one
   if (State.watchId !== null) {
     navigator.geolocation.clearWatch(State.watchId);
     State.watchId = null;
   }
+  let _lastRadiusCheck = 0;
   State.watchId = navigator.geolocation.watchPosition(
     p => {
       State.userPos = [p.coords.latitude, p.coords.longitude];
       _updateUserMarker(State.userPos);
+      const now = Date.now();
+      if (now - _lastRadiusCheck > 3000) {
+        _lastRadiusCheck = now;
+        const inside = _isInsideRadius(State.userPos);
+        const chip = document.getElementById('chip-radius');
+        if (chip) chip.style.borderColor = inside ? '#1d9e75' : '#e94560';
+      }
     },
-    null,
+    err => {
+      // Fix 2: handle geolocation errors gracefully
+      const msgs = {
+        1: 'GPS-Zugriff verweigert — bitte in Browser-Einstellungen erlauben',
+        2: 'GPS-Position nicht verfügbar',
+        3: 'GPS-Zeitüberschreitung — versuche es erneut',
+      };
+      showToast('⚠ ' + (msgs[err.code] || 'GPS-Fehler: ' + err.message));
+      document.getElementById('fab-locate')?.classList.remove('active');
+    },
     { enableHighAccuracy: true, maximumAge: 5000 }
   );
 }

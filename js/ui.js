@@ -19,7 +19,7 @@ function formatTime(seconds) {
 
 function updateRadiusLabels() {
   const km   = State.radiusKm;
-  const secs = Math.round(km / 100 * 3600);
+  const secs = Math.round(km / 85 * 3600);
   const mode = State.radiusMode;
 
   const chipText =
@@ -27,7 +27,8 @@ function updateRadiusLabels() {
     mode === 'road'   ? `${km} km Straße`    :
     `${formatTime(secs)} Fahrzeit`;
 
-  document.getElementById('chip-radius-val').textContent = chipText;
+  const _chipRadiusVal = document.getElementById('chip-radius-val');
+  if (_chipRadiusVal) _chipRadiusVal.textContent = chipText;
 
   const roadLbl = document.getElementById('rmode-road-label');
   const timeLbl = document.getElementById('rmode-time-label');

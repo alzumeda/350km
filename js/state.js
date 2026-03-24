@@ -39,8 +39,18 @@ const State = {
   // OCM
   ocmKey: localStorage.getItem('ocm-key') || '',
 
+  // Active isochrone source (set after each successful draw)
+  isochroneSource: null, // 'ors' | 'valhalla' | 'osrm' | 'aerial' | null
+
+  // Max distance from route to consider a crossing "used" (km)
+  crossingMaxDistKm: parseInt(localStorage.getItem('crossing-max-km') || '30', 10),
+
   // OpenChargeMap
   ocmKey: localStorage.getItem('ocm-key') || '',
+
+  // Elevation data for GPX export (set by elevation.js)
+  lastElevations:  null,
+  lastElevSamples: null,
 
   // UI chips (set after DOM ready)
   chips: {},
