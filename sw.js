@@ -1,4 +1,4 @@
-const CACHE_APP   = 'de350-app-v4';
+const CACHE_APP   = 'de350-app-v7';
 const CACHE_TILES = 'de350-tiles-v1';
 
 const APP_ASSETS = [
@@ -21,7 +21,14 @@ const APP_ASSETS = [
   './js/poi.js',
   './js/search.js',
   './js/gpx.js',
+  './js/settings.js',
   './js/app.js',
+  // CDN libs — cached on first load via fetch handler, precached here for offline
+  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
+  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
+  'https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js',
+  'https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.min.js',
+  'https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css',
   // CDN libs
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
@@ -60,15 +67,25 @@ self.addEventListener('fetch', e => {
 
   // Map tiles: network-first, cache fallback (stale tiles are fine)
   if (url.includes('tile.openstreetmap') || url.includes('/tiles/')) {
+    const tileKey = url.replace(/https:\/\/[abc]\.tile\./, 'https://a.tile.');
     e.respondWith(
       caches.open(CACHE_TILES).then(async cache => {
+        const cached = await cache.match(tileKey);
+        if (cached) return cached;
         try {
           const res = await fetch(e.request);
-          if (res.ok) cache.put(e.request, res.clone());
+          if (res.ok) {
+            cache.put(tileKey, res.clone());
+            // Evict oldest tiles if cache exceeds 500 entries
+            cache.keys().then(keys => {
+              if (keys.length > 500) {
+                keys.slice(0, keys.length - 500).forEach(k => cache.delete(k));
+              }
+            });
+          }
           return res;
         } catch {
-          const cached = await cache.match(e.request);
-          return cached || new Response('', { status: 503 });
+          return new Response('', { status: 503 });
         }
       })
     );

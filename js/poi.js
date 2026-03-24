@@ -83,14 +83,16 @@ async function searchPOI(type) {
 
     list.innerHTML = '';
 
+    // Fix 8: only show data source in toast for EV searches
+    const sourceLabel = (type.minKw != null) ? ` (${source})` : '';
+
     if (type.minKw != null && State.userPos) {
-      // EV charger: enrich top-5 by aerial with OSRM drive time, then re-sort
-      filtered.forEach(el => _renderPoiItem(el, type, panel, true)); // show immediately
-      showToast(`${filtered.length} ${type.label} gefunden (${source}) – berechne Fahrzeit…`);
+      filtered.forEach(el => _renderPoiItem(el, type, panel, true));
+      showToast(`${filtered.length} ${type.label} gefunden${sourceLabel} – berechne Fahrzeit…`);
       _enrichEvWithDriveTime(filtered, type, panel);
     } else {
       filtered.forEach(el => _renderPoiItem(el, type, panel, false));
-      showToast(`${filtered.length} ${type.label} gefunden (${source})`);
+      showToast(`${filtered.length} ${type.label} gefunden${sourceLabel}`);
     }
 
   } catch (err) {

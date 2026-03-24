@@ -20,13 +20,23 @@ function getSharedRadiusBuffer() {
 
 function initMap() {
   State.map = L.map('map', {
-    zoomControl: true,
+    zoomControl:        true,
     attributionControl: true,
+    preferCanvas:       true,
+    zoomSnap:           0.5,
+    wheelPxPerZoomLevel: 120,
+    minZoom:            3,    // Don't zoom out too far
+    maxBounds:          [[25, -25], [75, 55]], // Europe bounds — no Antarktis
+    maxBoundsViscosity: 0.8,  // Soft bounce at edges
   }).setView(GERMANY_CENTER, 5);
 
   State.tileLayer = L.tileLayer(TILE_LAYERS.standard.url, {
-    attribution: TILE_LAYERS.standard.attr,
-    maxZoom: 18,
+    attribution:       TILE_LAYERS.standard.attr,
+    maxZoom:           18,
+    keepBuffer:        4,     // Pre-load 4 tile widths outside viewport
+    updateWhenZooming: false, // Don't load tiles mid-zoom — wait for zoom end
+    updateWhenIdle:    false, // Load tiles during pan (not just on idle)
+    crossOrigin:       true,  // Enables browser tile caching
   }).addTo(State.map);
 
   // Draw initial radius
@@ -36,6 +46,19 @@ function initMap() {
   State.chips.radius   = document.getElementById('chip-radius');
   State.chips.location = document.getElementById('chip-location');
   State.chips.dist     = document.getElementById('chip-dist');
+
+  // Cache hot DOM elements — avoids repeated getElementById on every interaction
+  State.dom = {
+    orsProgress:     document.getElementById('ors-progress'),
+    chipRadiusVal:   document.getElementById('chip-radius-val'),
+    routeBorderDist: document.getElementById('route-border-dist'),
+    poiPanel:        document.getElementById('poi-panel'),
+    poiList:         document.getElementById('poi-list'),
+    searchResults:   document.getElementById('search-results'),
+    btnPoi:          document.getElementById('btn-poi'),
+    routePanel:      document.getElementById('route-panel'),
+    fabClear:        document.getElementById('fab-clear'),
+  };
 
   State.chips.radius.classList.add('visible');
   State.chips.radius.style.cursor = 'pointer';
